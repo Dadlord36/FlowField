@@ -1,5 +1,6 @@
 ﻿using System;
 using Unity.Collections;
+using Unity.Mathematics;
 
 namespace Structs
 {
@@ -40,6 +41,12 @@ namespace Structs
         {
             get => _array[index];
             set => _array[index] = value;
+        }
+
+        public T this[in int2 index2D]
+        {
+            get => _array[index2D.x + index2D.y * _width];
+            set => _array[index2D.x + index2D.y * _width] = value;
         }
 
         public void Dispose()

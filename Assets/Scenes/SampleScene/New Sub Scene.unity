@@ -158,6 +158,17 @@ MonoBehaviour:
   gridCellSize:
     x: 100
     y: 100
+  spawnCylinderParameters:
+    center:
+      x: 0
+      y: 0
+      z: 0
+    radius: 50
+    height: 50
+    gridOrigin:
+      x: 0
+      y: 0
+      z: 0
 --- !u!4 &43583724
 Transform:
   m_ObjectHideFlags: 0

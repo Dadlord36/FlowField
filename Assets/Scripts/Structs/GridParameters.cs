@@ -6,6 +6,8 @@ namespace Structs
     [BurstCompile]
     public readonly struct GridParameters
     {
+        public static readonly int2 InvalidIndex2D = new (-1, -1);
+        
         public readonly float3 gridCenter;
         public readonly int cellsRowNumber;
         public readonly float2 gridTotalSize;

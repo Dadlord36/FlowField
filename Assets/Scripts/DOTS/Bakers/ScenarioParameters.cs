@@ -19,6 +19,8 @@ namespace DOTS.Bakers
         [SerializeField] private string flowMapFileName = "flow_field";
         [SerializeField] private float3 gridOrigin = Vector3.zero;
         [SerializeField] private float2 gridCellSize = new(100, 100);
+        
+        [SerializeField] private CylinderParameters spawnCylinderParameters;
 
         private static NativeArray2D<float2> ParseJsonFlowFieldMap(string inflowMapFileName)
         {
@@ -57,11 +59,17 @@ namespace DOTS.Bakers
                 {
                     gridParameters = new GridParameters(authoring.gridOrigin, flowMapArray.Width, authoring.gridCellSize)
                 };
+                
+                var cylinderParameters = new CylinderParametersComponent
+                {
+                    cylinderParameters = authoring.spawnCylinderParameters
+                };
 
                 EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
 
                 entityManager.CreateSingleton(flowMapComponent);
                 entityManager.CreateSingleton(gridParameters);
+                entityManager.CreateSingleton(cylinderParameters);
                 entityManager.CreateSingleton(new EntitySpawnParametersComponent
                 {
                     speed = authoring.parameters.speed,

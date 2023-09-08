@@ -8,6 +8,7 @@ using Unity.Transforms;
 namespace DOTS.Systems
 {
     [UpdateInGroup(typeof(SimulationSystemGroup))]
+    // [DisableAutoCreation]
     public partial struct VelocityDrivenMovementSystem : ISystem
     {
         [BurstCompile]
@@ -15,7 +16,6 @@ namespace DOTS.Systems
         {
             state.RequireForUpdate<SpeedComponent>();
             state.RequireForUpdate<VelocityComponent>();
-            state.RequireForUpdate<FlowFieldVelocityComponent>();
             state.RequireForUpdate<LocalToWorld>();
             state.RequireForUpdate<VelocityDrivenTag>();
         }
@@ -24,14 +24,14 @@ namespace DOTS.Systems
         public void OnUpdate(ref SystemState state)
         {
             float deltaTime = SystemAPI.Time.DeltaTime;
-            foreach (var (velocityComponent, flowFieldVelocityComponent, localTransform, speedComponent)
-                     in SystemAPI.Query<RefRO<VelocityComponent>, RefRO<FlowFieldVelocityComponent>, RefRW<LocalToWorld>, SpeedComponent>())
+            foreach (var (velocityComponent, localTransform, speedComponent)
+                     in SystemAPI.Query<RefRO<VelocityComponent>, RefRW<LocalToWorld>, SpeedComponent>())
             {
-                float2 flowFieldVelocity = flowFieldVelocityComponent.ValueRO.flowVelocity;
-                var finalVelocity = new float3(flowFieldVelocity.x, 0f, flowFieldVelocity.y);
-                // velocityComponent.ValueRW.velocity = math.normalize(velocityComponent.ValueRO.velocity) * speedComponent.speed;
-                float3 newPosition = localTransform.ValueRW.Position + finalVelocity * speedComponent.speed * deltaTime;
-                localTransform.ValueRW.Value = float4x4.Translate(newPosition);
+                ref readonly LocalToWorld currentTransform = ref localTransform.ValueRO;
+                float3 finalVelocity = velocityComponent.ValueRO.velocity;
+                float3 newPosition = currentTransform.Position + finalVelocity * speedComponent.speed * deltaTime;
+
+                localTransform.ValueRW.Value = float4x4.TRS(newPosition, currentTransform.Rotation, new float3(1f, 1f, 1f));
             }
         }
 

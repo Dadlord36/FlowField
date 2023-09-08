@@ -3,7 +3,6 @@ using DOTS.Components.Tags;
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Mathematics;
-using Unity.Rendering;
 
 namespace DOTS.Systems
 {
@@ -24,17 +23,13 @@ namespace DOTS.Systems
         public void OnUpdate(ref SystemState state)
         {
             RefRW<FlowMapComponent> flowMapComponent = SystemAPI.GetSingletonRW<FlowMapComponent>();
-            // RefRW<GridParametersComponent> gridParametersComponent = SystemAPI.GetSingletonRW<GridParametersComponent>();
 
-            foreach (var (cellIndexComponent, flowFieldVelocity) in SystemAPI.Query<RefRO<CellIndexComponent>, RefRW<FlowFieldVelocityComponent>>())
+            foreach (var (cellIndexComponent, flowFieldVelocity)
+                     in SystemAPI.Query<RefRO<CellIndexComponent>, RefRW<FlowFieldVelocityComponent>>())
             {
-                if (!cellIndexComponent.ValueRO.IsValid)
-                {
-                    continue;
-                }
-
-                int2 cellIndex = cellIndexComponent.ValueRO.index;
-                flowFieldVelocity.ValueRW.flowVelocity = flowMapComponent.ValueRO.flowMap[cellIndex.x, cellIndex.y];
+                flowFieldVelocity.ValueRW.flowVelocity = cellIndexComponent.ValueRO.IsValid
+                    ? flowMapComponent.ValueRO.flowMap[cellIndexComponent.ValueRO.index]
+                    : float2.zero;
             }
         }
 

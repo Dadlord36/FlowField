@@ -13,7 +13,8 @@ using UnityEngine;
 namespace DOTS.Systems
 {
     [UpdateInGroup(typeof(UpdatePresentationSystemGroup))]
-    public partial struct DebugDrawGrid : ISystem
+    [DisableAutoCreation]
+    public partial struct DebugDrawGridSystem : ISystem
     {
         [BurstCompile]
         private struct DrawGridJob : IJob

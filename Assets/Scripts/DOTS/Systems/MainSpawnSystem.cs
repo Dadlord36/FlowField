@@ -18,7 +18,50 @@ namespace DOTS.Systems
     public partial class MainSpawnSystem : SystemBase
     {
         [BurstCompile]
-        private struct SpawnJob : IJobParallelFor
+        private struct SpawnOnCylinderSurface : IJobParallelFor
+        {
+            public readonly Entity prototype;
+            public readonly GridParameters gridParameters;
+            public readonly CylinderParameters cylinderParameters;
+            public EntityCommandBuffer.ParallelWriter ecb;
+            public readonly float speed;
+
+            public SpawnOnCylinderSurface(Entity prototype, GridParameters gridParameters, CylinderParameters cylinderParameters,
+                EntityCommandBuffer.ParallelWriter ecb, float speed)
+            {
+                this.prototype = prototype;
+                this.gridParameters = gridParameters;
+                this.cylinderParameters = cylinderParameters;
+                this.ecb = ecb;
+                this.speed = speed;
+            }
+
+            public void Execute(int index)
+            {
+                // Clone the Prototype entity to create a new entity.
+                Entity e = ecb.Instantiate(index, prototype);
+                var cylinderPositioningComponent = new CylinderSurfacePositioningComponent();
+                // Prototype has all correct components up front, can use SetComponent to
+                // set values unique to the newly created entity, such as the transform.
+
+                LocalToWorld spawnTransform = ComputeTransformOnCylinderSurface(index);
+                CylinderCalculations.GetHeightAndAngleOnCylinderAt(cylinderParameters, spawnTransform.Position,
+                    out cylinderPositioningComponent.height, out cylinderPositioningComponent.angle);
+
+                ecb.SetComponent(index, e, spawnTransform);
+                ecb.SetComponent(index, e, CellIndexComponent.Invalid);
+                ecb.SetComponent(index, e, cylinderPositioningComponent);
+                ecb.AddSharedComponent(index, e, new SpeedComponent(speed));
+            }
+
+            private LocalToWorld ComputeTransformOnCylinderSurface(int index)
+            {
+                return CylinderCalculations.GetCellCenterAtReversed(gridParameters, cylinderParameters, index);
+            }
+        }
+
+        [BurstCompile]
+        private struct SpawnOnPlaneSurfaceJob : IJobParallelFor
         {
             public Entity prototype;
             public GridParameters gridParameters;
@@ -31,15 +74,18 @@ namespace DOTS.Systems
                 Entity e = ecb.Instantiate(index, prototype);
                 // Prototype has all correct components up front, can use SetComponent to
                 // set values unique to the newly created entity, such as the transform.
-                ecb.SetComponent(index, e, new LocalToWorld { Value = ComputeTransform(index) });
+                ecb.SetComponent(index, e, ComputeTransformOnPlane(index));
                 ecb.SetComponent(index, e, CellIndexComponent.Invalid);
                 ecb.AddSharedComponent(index, e, new SpeedComponent(speed));
             }
 
-            private float4x4 ComputeTransform(int index)
+            private LocalToWorld ComputeTransformOnPlane(int index)
             {
                 float3 position = GridCalculations.GetCellCenterAtReversed(gridParameters, index);
-                return float4x4.Translate(position);
+                return new LocalToWorld
+                {
+                    Value = float4x4.Translate(position)
+                };
             }
         }
 
@@ -47,11 +93,15 @@ namespace DOTS.Systems
 
         protected override void OnStartRunning()
         {
-            foreach (var (spawnEntityParametersTag, renderMeshArray) in SystemAPI
-                         .Query<RefRO<SpawnEntityParametersTag>, RenderMeshArray>())
+            Entity seekingEntity = Entity.Null;
+            foreach (var (_, renderMeshArray, entity) in SystemAPI.Query<RefRO<SpawnEntityParametersTag>, RenderMeshArray>().WithEntityAccess())
             {
                 _renderMeshArrayRecord = renderMeshArray;
+                seekingEntity = entity;
             }
+
+            //Destroy the entity that was used to query the RenderMeshArray
+            EntityManager.DestroyEntity(seekingEntity);
         }
 
         protected override void OnUpdate()
@@ -62,22 +112,21 @@ namespace DOTS.Systems
             var ecb = new EntityCommandBuffer(Allocator.TempJob);
             RefRW<EntitySpawnParametersComponent> entitySpawnParameters = SystemAPI.GetSingletonRW<EntitySpawnParametersComponent>();
             RefRW<GridParametersComponent> gridParametersComponent = SystemAPI.GetSingletonRW<GridParametersComponent>();
+            RefRW<CylinderParametersComponent> cylinderParametersComponent = SystemAPI.GetSingletonRW<CylinderParametersComponent>();
 
             // Spawn most of the entities in a Burst job by cloning a pre-created prototype entity,
             // which can be either a Prefab or an entity created at run time like in this sample.
             // This is the fastest and most efficient way to create entities at run time.
             int entityCount = entitySpawnParameters.ValueRO.entityCount;
-            JobHandle spawnJob = new SpawnJob
-            {
-                prototype = prototype,
-                speed = entitySpawnParameters.ValueRO.speed,
-                gridParameters = gridParametersComponent.ValueRO.gridParameters,
-                ecb = ecb.AsParallelWriter(),
-            }.Schedule(entityCount, entityCount / Environment.ProcessorCount);
+            JobHandle spawnJob = new SpawnOnCylinderSurface(prototype, gridParametersComponent.ValueRO.gridParameters,
+                    cylinderParametersComponent.ValueRO.cylinderParameters,
+                    ecb.AsParallelWriter(),
+                    entitySpawnParameters.ValueRO.speed)
+                .Schedule(entityCount, entityCount / Environment.ProcessorCount);
 
             spawnJob.Complete();
             CompleteDependency();
-            
+
             ecb.Playback(entityManager);
             ecb.Dispose();
         }
@@ -91,7 +140,8 @@ namespace DOTS.Systems
                 receiveShadows: false);
 
             EntityArchetype archetype = entityManager.CreateArchetype(typeof(FlowDrivenTag), typeof(VelocityDrivenTag),
-                typeof(VelocityComponent), typeof(FlowFieldVelocityComponent), typeof(CellIndexComponent), typeof(LocalToWorld));
+                typeof(VelocityComponent), typeof(FlowFieldVelocityComponent), typeof(CellIndexComponent), typeof(LocalToWorld),
+                typeof(CylinderSurfacePositioningComponent));
             // Create empty base entity
             Entity prototype = entityManager.CreateEntity(archetype);
 
