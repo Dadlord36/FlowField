@@ -3,7 +3,6 @@ using FunctionalLibraries;
 using Structs;
 using Unity.Burst;
 using Unity.Entities;
-using Unity.Transforms;
 
 namespace DOTS.Systems
 {
@@ -29,7 +28,7 @@ namespace DOTS.Systems
                          .Query<RefRW<CellIndexComponent>, RefRO<CylinderSurfacePositioningComponent>>())
             {
                 ref readonly CylinderSurfacePositioningComponent surfacePositioning = ref surfacePositioningComponent.ValueRO;
-                cellIndexComponent.ValueRW.index = CylinderCalculations.GetCellIndex2DAt(gridParameters, cylinderParameters,
+                cellIndexComponent.ValueRW.index = CylinderCalculations.GetCellIndex2DOnCylinderSurfaceAt(gridParameters, cylinderParameters,
                     surfacePositioning.height, surfacePositioning.angle);
             }
         }

@@ -14,19 +14,15 @@ namespace FunctionalLibraries
         /// </summary>
         /// <param name="cylinderCenter"> Cylinder center. </param>
         /// <param name="cylinderRadius"> Cylinder radius. </param>
-        /// <param name="angle"> Angle in radians. </param>
+        /// <param name="angleInRadians"> Angle in radians. </param>
         /// <param name="height"> Height of the point. </param>
         /// <returns> Point on the surface of a cylinder. </returns>
-        public static float3 GetPointOnCylinderSurfaceAt(in float3 cylinderCenter, float cylinderRadius, float angle, float height)
+        public static float3 GetPointOnCylinderSurfaceAt(in float3 cylinderCenter, float cylinderRadius, float angleInRadians, float height)
         {
-            //Asset that angle is in range [0, 2 * PI].
-            angle = math.clamp(angle, 0, _twoPI);
-            return new float3
-            {
-                x = cylinderCenter.x + cylinderRadius * math.cos(angle),
-                y = cylinderCenter.y + height,
-                z = cylinderCenter.z + cylinderRadius * math.sin(angle)
-            };
+            float x = cylinderCenter.x + cylinderRadius * math.cos(angleInRadians);
+            float y = cylinderCenter.y + height;
+            float z = cylinderCenter.z + cylinderRadius * math.sin(angleInRadians);
+            return new float3(x, y, z);
         }
 
         /// <summary>
@@ -56,6 +52,31 @@ namespace FunctionalLibraries
             float angle = CalculateRadiansAngleOnCylinderAtGridIndex(gridParameters, cylinderParameters, cellIndex);
             float height = CalculateHeightOnCylinderAtGridIndex(gridParameters, cellIndex);
             return GetPointOnCylinderSurfaceAt(cylinderParameters, angle, height);
+        }
+
+        // Make sure that the position is on the surface of the cylinder and not away from it (with some tolerance).
+        public static bool IsOnCylinderSurface(in CylinderParameters cylinderParameters, in float3 position)
+        {
+            float3 cylinderCenter = cylinderParameters.center;
+            float3 cylinderOrigin = cylinderParameters.cylinderOrigin;
+            float3 cylinderCenterToPosition = position - cylinderCenter;
+            float3 cylinderOriginToPosition = position - cylinderOrigin;
+            float distanceFromCenter = math.length(cylinderCenterToPosition);
+            float distanceFromOrigin = math.length(cylinderOriginToPosition);
+
+            return math.abs(distanceFromCenter - cylinderParameters.radius) < 0.1f &&
+                   math.abs(distanceFromOrigin - cylinderParameters.radius) < 0.1f;
+        }
+
+        public static int2 GetCellIndex2DOnCylinderSurfaceAt(in GridParameters gridParameters, in CylinderParameters cylinderParameters,
+            float surfacePositioningHeight, float surfacePositioningAngleInRadians)
+        {
+            // Normalize the angle to be within [0, 2 * PI]
+            surfacePositioningAngleInRadians = (surfacePositioningAngleInRadians + _twoPI) % _twoPI;
+
+            return math.int2(
+                (int)math.round(surfacePositioningAngleInRadians * cylinderParameters.radius / gridParameters.cellSize.x),
+                (int)math.round(surfacePositioningHeight / gridParameters.cellSize.y));
         }
 
         public static LocalToWorld CalculateLocalToWorldMatrixAt(in GridParameters gridParameters, in CylinderParameters cylinderParameters,
@@ -112,27 +133,10 @@ namespace FunctionalLibraries
             };
         }
 
-        private static float CalculateRadiansAngleOnCylinderAtGridIndex(in GridParameters gridParameters, in CylinderParameters cylinderParameters,
-            in int2 cellIndex)
-        {
-            return cellIndex.x * gridParameters.cellSize.x / cylinderParameters.radius;
-        }
-
-        private static float CalculateHeightOnCylinderAtGridIndex(in GridParameters gridParameters, in int2 cellIndex)
-        {
-            return cellIndex.y * gridParameters.cellSize.y;
-        }
-
         public static float CalculateRadiansAngleOnCylinderAtPosition(in CylinderParameters cylinderParameters, in float3 position)
         {
             float angle = math.atan2(position.z - cylinderParameters.center.z, position.x - cylinderParameters.center.x);
             return angle;
-        }
-
-        private static float CalculateHeightOnCylinderAtPosition(in CylinderParameters cylinderParameters, in float3 position)
-        {
-            float height = position.y - cylinderParameters.cylinderOrigin.y;
-            return height;
         }
 
         public static void GetHeightAndAngleOnCylinderAt(in CylinderParameters cylinderParameters, in float3 position, out float height,
@@ -142,31 +146,21 @@ namespace FunctionalLibraries
             angle = CalculateRadiansAngleOnCylinderAtPosition(cylinderParameters, position);
         }
 
-        // Make sure that the position is on the surface of the cylinder and not away from it (with some tolerance).
-        public static bool IsOnCylinderSurface(in CylinderParameters cylinderParameters, in float3 position)
+        private static float CalculateHeightOnCylinderAtPosition(in CylinderParameters cylinderParameters, in float3 position)
         {
-            float3 cylinderCenter = cylinderParameters.center;
-            float3 cylinderOrigin = cylinderParameters.cylinderOrigin;
-            float3 cylinderCenterToPosition = position - cylinderCenter;
-            float3 cylinderOriginToPosition = position - cylinderOrigin;
-            float distanceFromCenter = math.length(cylinderCenterToPosition);
-            float distanceFromOrigin = math.length(cylinderOriginToPosition);
-
-            return math.abs(distanceFromCenter - cylinderParameters.radius) < 0.1f &&
-                   math.abs(distanceFromOrigin - cylinderParameters.radius) < 0.1f;
+            float height = position.y - cylinderParameters.cylinderOrigin.y;
+            return height;
         }
 
-        public static int2 GetCellIndex2DAt(in GridParameters gridParameters, in CylinderParameters cylinderParameters,
-            float surfacePositioningHeight, float surfacePositioningAngle)
+        private static float CalculateRadiansAngleOnCylinderAtGridIndex(in GridParameters gridParameters, in CylinderParameters cylinderParameters,
+            in int2 cellIndex)
         {
-            float height = math.clamp(surfacePositioningHeight, 0, cylinderParameters.height);
-            float angle = math.clamp(surfacePositioningAngle, 0, _twoPI);
-            var cellIndex2D = new int2
-            {
-                x = (int)math.round(angle * cylinderParameters.radius / gridParameters.cellSize.x),
-                y = (int)math.round(height / gridParameters.cellSize.y)
-            };
-            return cellIndex2D;
+            return cellIndex.x * gridParameters.cellSize.x / cylinderParameters.radius;
+        }
+
+        private static float CalculateHeightOnCylinderAtGridIndex(in GridParameters gridParameters, in int2 cellIndex)
+        {
+            return cellIndex.y * gridParameters.cellSize.y;
         }
     }
 }

@@ -5,13 +5,18 @@ using Structs;
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Mathematics;
+using Unity.Rendering;
 using UnityEngine;
 
 
 namespace DOTS.Systems
 {
+    [UpdateInGroup(typeof(UpdatePresentationSystemGroup))]
     public partial struct DebugDrawCylinderSystem : ISystem
     {
+        private static readonly float3 Up = Vector3.up;
+
         [BurstCompile]
         private struct DrawCylinderJob : IJob
         {
@@ -26,8 +31,8 @@ namespace DOTS.Systems
 
             public void Execute()
             {
-                _drawingBuilder.WireCylinder(_cylinderParameters.cylinderOrigin, Vector3.up, _cylinderParameters.radius, _cylinderParameters.height,
-                    Color.magenta);
+                _drawingBuilder.WireCylinder(_cylinderParameters.cylinderOrigin, Up, _cylinderParameters.radius,
+                    _cylinderParameters.height, Color.magenta);
             }
         }
 
@@ -41,17 +46,17 @@ namespace DOTS.Systems
         public void OnUpdate(ref SystemState state)
         {
             CommandBuilder drawingBuilder = DrawingManager.GetBuilder(true);
-            var gridParametersComponent = SystemAPI.GetSingleton<GridParametersComponent>();
             var cylinderParametersComponent = SystemAPI.GetSingleton<CylinderParametersComponent>();
+            var gridParametersComponent = SystemAPI.GetSingleton<GridParametersComponent>();
             ref GridParameters gridParameters = ref gridParametersComponent.gridParameters;
 
             JobHandle drawCylinderJobHandle =
                 new DrawCylinderJob(cylinderParametersComponent.cylinderParameters, drawingBuilder).Schedule(state.Dependency);
-            /*JobHandle drawCellsOnCylinderJobHandle =
+            JobHandle drawCellsOnCylinderJobHandle =
                 new DrawOccupiedCellOnCylinderJob(drawingBuilder, gridParameters, cylinderParametersComponent.cylinderParameters).ScheduleParallel(
-                    drawCylinderJobHandle);*/
+                    drawCylinderJobHandle);
 
-            drawingBuilder.DisposeAfter(drawCylinderJobHandle);
+            drawingBuilder.DisposeAfter(drawCellsOnCylinderJobHandle);
 
             state.CompleteDependency();
         }
