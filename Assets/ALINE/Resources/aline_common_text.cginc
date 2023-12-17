@@ -2,15 +2,15 @@
 
 float4 _Color;
 float4 _FadeColor;
-sampler2D _MainTex;
-sampler2D _FallbackTex;
+UNITY_DECLARE_TEX2D(_MainTex);
+UNITY_DECLARE_TEX2D(_FallbackTex);
 float _FallbackAmount;
 float _TransitionPoint;
 float _MipBias;
 float _GammaCorrection;
 
 struct vertex {
-    float4 vertex : POSITION;
+    float4 pos : POSITION;
     float4 color : COLOR;
     float2 uv : TEXCOORD0;
     UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -29,7 +29,7 @@ v2f vert_base (vertex v, float4 tint, out float4 outpos : SV_POSITION) {
     o.uv = v.uv;
     o.col = v.color * tint;
     o.col.rgb = ConvertSRGBToDestinationColorSpace(o.col.rgb);
-    outpos = TransformObjectToHClip(v.vertex.xyz);
+    outpos = TransformObjectToHClip(v.pos.xyz);
     return o;
 }
 
@@ -40,7 +40,7 @@ v2f vert_base (vertex v, float4 tint, out float4 outpos : SV_POSITION) {
 // 	// Depends on texture generation settings
 // 	const float falloffPixels = 5;
 
-// 	float sample = tex2D(_MainTex, uv).a;
+// 	float sample = UNITY_SAMPLE_TEX2D(_MainTex, uv).a;
 // 	// float scale = 1.0 / fwidth(sample);
 // 	float signedDistance1 = (0.5 - sample) * falloffPixels;
 // 	float signedDistance2 = signedDistance1 / pixelSize;
@@ -54,24 +54,24 @@ v2f vert_base (vertex v, float4 tint, out float4 outpos : SV_POSITION) {
 // }
 
 float getAlpha(float2 uv) {
-    float sample = tex2D(_MainTex, uv).a;
-    float scale = 1.0 / fwidth(sample);
-    float signedDistance = (sample - 0.5) * scale;
-    float color = clamp(signedDistance + 0.5, 0.0, 1.0);
+    float rawSignedDistance = UNITY_SAMPLE_TEX2D(_MainTex, uv).a;
+    float scale = 1.0 / fwidth(rawSignedDistance);
+    float thresholdedDistance = (rawSignedDistance - 0.5) * scale;
+    float color = clamp(thresholdedDistance + 0.5, 0.0, 1.0);
     return color;
 }
 
 // Shader modified from https://evanw.github.io/font-texture-generator/example-webgl/
-float4 frag (v2f i, float4 screenPos : VPOS) : COLOR {
+float4 frag (v2f i, float4 screenPos : VPOS) : SV_Target {
     // float halfpixelSize = 0.5 * 0.5 * length(float2(ddx(i.uv.x), ddy(i.uv.x)));
-    // float fcolor0 = tex2D(_FallbackTex, i.uv).a;
-    // float fcolor1 = tex2D(_FallbackTex, i.uv + float2(halfpixelSize * 0.6, halfpixelSize * 0.3)).a;
-    // float fcolor2 = tex2D(_FallbackTex, i.uv + float2(-halfpixelSize * 0.3, halfpixelSize * 0.6)).a;
-    // float fcolor3 = tex2D(_FallbackTex, i.uv + float2(-halfpixelSize * 0.6, -halfpixelSize * 0.3)).a;
-    // float fcolor4 = tex2D(_FallbackTex, i.uv + float2(halfpixelSize * 0.3, -halfpixelSize * 0.6)).a;
+    // float fcolor0 = UNITY_SAMPLE_TEX2D(_FallbackTex, i.uv).a;
+    // float fcolor1 = UNITY_SAMPLE_TEX2D(_FallbackTex, i.uv + float2(halfpixelSize * 0.6, halfpixelSize * 0.3)).a;
+    // float fcolor2 = UNITY_SAMPLE_TEX2D(_FallbackTex, i.uv + float2(-halfpixelSize * 0.3, halfpixelSize * 0.6)).a;
+    // float fcolor3 = UNITY_SAMPLE_TEX2D(_FallbackTex, i.uv + float2(-halfpixelSize * 0.6, -halfpixelSize * 0.3)).a;
+    // float fcolor4 = UNITY_SAMPLE_TEX2D(_FallbackTex, i.uv + float2(halfpixelSize * 0.3, -halfpixelSize * 0.6)).a;
     // float fallbackAlpha = (fcolor0 + fcolor1 + fcolor2 + fcolor3 + fcolor4) * 0.2;
     // Bias the texture sampling to use a lower mipmap level. This makes the text much sharper and clearer.
-    float fallbackAlpha = tex2Dbias(_FallbackTex, float4(i.uv, 0, _MipBias)).a;
+    float fallbackAlpha = UNITY_SAMPLE_TEX2D_BIAS(_FallbackTex, i.uv, _MipBias).a;
 
     // The fallback is used for small font sizes.
     // Boost the alpha to make it more legible
@@ -97,7 +97,7 @@ float4 frag (v2f i, float4 screenPos : VPOS) : COLOR {
     // A smaller value will make the transition cover a larger range of font sizes
     float transitionSharpness = 10;
     float blend = clamp(transitionSharpness*(_TransitionPoint*pixelSize*sdfTextureWidth - 1.0), 0, 1);
-    
+
     float alpha = lerp(sdfAlpha, fallbackAlpha, blend * _FallbackAmount);
 
     float4 blendcolor = float4(1,1,1,1);

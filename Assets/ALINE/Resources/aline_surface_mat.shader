@@ -7,7 +7,6 @@ Shader "Hidden/ALINE/Surface" {
 	}
 
 	HLSLINCLUDE
-	sampler2D _MainTex;
 	float4 _MainTex_ST;
 	float4 _Color;
 	float4 _FadeColor;
@@ -33,23 +32,25 @@ Shader "Hidden/ALINE/Surface" {
 			Offset 0, 0
 			ZWrite On
 			ColorMask 0
-			
+
 			HLSLPROGRAM
 			#define UNITY_HDRP
 			#include "aline_common_surface.cginc"
 
+			UNITY_DECLARE_TEX2D(_MainTex);
+
 			v2f vert (appdata_color v) {
 				return vert_base(v, _Color, _Scale);
 			}
-			
-			float4 frag (v2f i) : COLOR {
+
+			float4 frag (v2f i) : SV_Target {
 				if (i.col.a < 0.3) discard;
 				return float4(1,1,1,1);
 			}
 			ENDHLSL
 		}
 
-		
+
 		// Render behind
 		Pass {
 			ZWrite Off
@@ -60,17 +61,19 @@ Shader "Hidden/ALINE/Surface" {
 			#define UNITY_HDRP
 			#include "aline_common_surface.cginc"
 
+			UNITY_DECLARE_TEX2D(_MainTex);
+
 			v2f vert (appdata_color v) {
 				return vert_base(v, _Color * _FadeColor, _Scale);
 			}
 
-			float4 frag (v2f i) : COLOR {
-				return tex2D (_MainTex, i.uv) * i.col;
+			float4 frag (v2f i) : SV_Target {
+				return UNITY_SAMPLE_TEX2D(_MainTex, i.uv) * i.col;
 			}
 			ENDHLSL
 
 		}
-		
+
 		// Render in front
 		Pass {
 			ZWrite Off
@@ -81,12 +84,14 @@ Shader "Hidden/ALINE/Surface" {
 			#define UNITY_HDRP
 			#include "aline_common_surface.cginc"
 
+			UNITY_DECLARE_TEX2D(_MainTex);
+
 			v2f vert (appdata_color v) {
 				return vert_base(v, _Color, _Scale);
 			}
 
-			float4 frag (v2f i) : COLOR {
-				return tex2D (_MainTex, i.uv) * i.col;
+			float4 frag (v2f i) : SV_Target {
+				return UNITY_SAMPLE_TEX2D(_MainTex, i.uv) * i.col;
 			}
 			ENDHLSL
 		}
@@ -103,22 +108,24 @@ Shader "Hidden/ALINE/Surface" {
 			Offset 0, 0
 			ZWrite On
 			ColorMask 0
-			
+
 			HLSLPROGRAM
 			#include "aline_common_surface.cginc"
+
+			UNITY_DECLARE_TEX2D(_MainTex);
 
 			v2f vert (appdata_color v) {
 				return vert_base(v, _Color, _Scale);
 			}
-			
-			float4 frag (v2f i) : COLOR {
+
+			float4 frag (v2f i) : SV_Target {
 				if (i.col.a < 0.3) discard;
 				return float4(1,1,1,1);
 			}
 			ENDHLSL
 		}
 
-		
+
 		// Render behind
 		Pass {
 			ZWrite Off
@@ -128,17 +135,19 @@ Shader "Hidden/ALINE/Surface" {
 			HLSLPROGRAM
 			#include "aline_common_surface.cginc"
 
+			UNITY_DECLARE_TEX2D(_MainTex);
+
 			v2f vert (appdata_color v) {
 				return vert_base(v, _Color * _FadeColor, _Scale);
 			}
 
-			float4 frag (v2f i) : COLOR {
-				return tex2D (_MainTex, i.uv) * i.col;
+			float4 frag (v2f i) : SV_Target {
+				return UNITY_SAMPLE_TEX2D(_MainTex, i.uv) * i.col;
 			}
 			ENDHLSL
 
 		}
-		
+
 		// Render in front
 		Pass {
 			ZWrite Off
@@ -148,12 +157,14 @@ Shader "Hidden/ALINE/Surface" {
 			HLSLPROGRAM
 			#include "aline_common_surface.cginc"
 
+			UNITY_DECLARE_TEX2D(_MainTex);
+
 			v2f vert (appdata_color v) {
 				return vert_base(v, _Color, _Scale);
 			}
 
-			float4 frag (v2f i) : COLOR {
-				return tex2D (_MainTex, i.uv) * i.col;
+			float4 frag (v2f i) : SV_Target {
+				return UNITY_SAMPLE_TEX2D(_MainTex, i.uv) * i.col;
 			}
 			ENDHLSL
 		}

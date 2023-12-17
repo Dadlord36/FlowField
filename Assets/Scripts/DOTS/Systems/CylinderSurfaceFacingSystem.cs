@@ -4,6 +4,7 @@ using FunctionalLibraries;
 using Structs;
 using Unity.Burst;
 using Unity.Entities;
+using Unity.Mathematics;
 using Unity.Transforms;
 
 namespace DOTS.Systems
@@ -16,22 +17,19 @@ namespace DOTS.Systems
         [StructLayout(LayoutKind.Auto)]
         private partial struct FaceCylinderSurfaceJob : IJobEntity
         {
-            private readonly CylinderParameters _cylinderParameters;
-
-            public FaceCylinderSurfaceJob(CylinderParameters cylinderParameters) : this()
-            {
-                _cylinderParameters = cylinderParameters;
-            }
-
-            private void Execute(RefRO<CylinderSurfacePositioningComponent> cylinderSurfacePositioningComponent, RefRW<LocalToWorld> localToWorld)
+            private void Execute(RefRO<CylinderSurfacePositioningComponent> cylinderSurfacePositioningComponent, RefRW<LocalToWorld> localToWorld,
+                RefRO<VelocityComponent> velocityComponent, in CylinderParametersComponent cylinderParametersComponent)
             {
                 ref readonly CylinderSurfacePositioningComponent cylinderSurfacePositioning = ref cylinderSurfacePositioningComponent.ValueRO;
-                localToWorld.ValueRW = ComputeTransformOnCylinderSurface(cylinderSurfacePositioning.height, cylinderSurfacePositioning.angle);
+                localToWorld.ValueRW = ComputeTransformOnCylinderSurface(cylinderParametersComponent.cylinderParameters,cylinderSurfacePositioning.height, cylinderSurfacePositioning.angle,
+                    velocityComponent.ValueRO.velocity);
             }
 
-            private LocalToWorld ComputeTransformOnCylinderSurface(float height, float angle)
+            private static LocalToWorld ComputeTransformOnCylinderSurface(CylinderParameters cylinderParameters, float height, float angle,
+                in float3 finalForwardVector)
             {
-                return CylinderCalculations.CalculateLocalToWorldOnCylinderSurfacePerpendicularToIt(_cylinderParameters, height, angle);
+                return CylinderCalculations.CalculateLocalToWorldOnCylinderSurfacePerpendicularToIt(cylinderParameters, height, angle,
+                    finalForwardVector);
             }
         }
 
@@ -41,14 +39,14 @@ namespace DOTS.Systems
             state.RequireForUpdate<LocalToWorld>();
             state.RequireForUpdate<CylinderSurfacePositioningComponent>();
             state.RequireForUpdate<CylinderParametersComponent>();
+            state.RequireForUpdate<VelocityComponent>();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            var faceCylinderSurfaceJob =
-                new FaceCylinderSurfaceJob(SystemAPI.GetSingletonRW<CylinderParametersComponent>().ValueRO.cylinderParameters);
-            faceCylinderSurfaceJob.ScheduleParallel();
+            state.Dependency = new FaceCylinderSurfaceJob().ScheduleParallel(state.Dependency);
+            state.CompleteDependency();
         }
 
         [BurstCompile]

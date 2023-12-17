@@ -9,5 +9,6 @@ namespace Parameters
         public Material material;
         public int entityCount;
         [Min(0f)] public float speed;
+        [Min(0f)] public float crowdAvoidanceDistance;
     }
 }

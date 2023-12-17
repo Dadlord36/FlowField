@@ -7,7 +7,7 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Rendering;
 
-namespace DOTS.Systems
+namespace DOTS.Systems.DebugSystems
 {
     [UpdateInGroup(typeof(UpdatePresentationSystemGroup)), UpdateAfter(typeof(DebugDrawGridSystem))]
     [DisableAutoCreation]
@@ -26,7 +26,8 @@ namespace DOTS.Systems
             ref GridParameters gridParameters = ref gridParametersComponent.gridParameters;
             JobHandle drawJob = new DebugDrawOccupiedGridCellJob(drawingBuilder, gridParameters).ScheduleParallel(state.Dependency);
             drawingBuilder.DisposeAfter(drawJob);
-
+           
+            drawJob.Complete();
             state.CompleteDependency();
         }
 

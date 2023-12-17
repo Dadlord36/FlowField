@@ -46,7 +46,7 @@ namespace Drawing.Examples {
 				using (draw.InScreenSpace(cam)) {
 					// Draw a circle at each curve control point
 					for (int i = 0; i < curves.Count; i++) {
-						draw.CircleXY((Vector3)curves[i].position, 2, Color.blue);
+						draw.xy.Circle((Vector3)curves[i].position, 2, Color.blue);
 					}
 
 					// Draw each bezier curve segment

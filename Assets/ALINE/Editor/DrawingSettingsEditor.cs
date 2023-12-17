@@ -5,13 +5,17 @@ using UnityEngine;
 namespace Drawing {
 	/// <summary>Helper for adding project settings</summary>
 	static class ALINESettingsRegister {
+		const string PROVIDER_PATH = "Project/ALINE";
+		const string SETTINGS_LABEL = "ALINE";
+
+
 		[SettingsProvider]
 		public static SettingsProvider CreateMyCustomSettingsProvider () {
 			// First parameter is the path in the Settings window.
 			// Second parameter is the scope of this setting: it only appears in the Project Settings window.
-			var provider = new SettingsProvider("Project/ALINE", SettingsScope.Project) {
+			var provider = new SettingsProvider(PROVIDER_PATH, SettingsScope.Project) {
 				// By default the last token of the path is used as display name if no label is provided.
-				label = "ALINE",
+				label = SETTINGS_LABEL,
 				guiHandler = (searchContext) =>
 				{
 					var settings = new SerializedObject(DrawingSettings.GetSettingsAsset());

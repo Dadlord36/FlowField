@@ -9,20 +9,19 @@ using Unity.Burst;
 using UnityEngine.Rendering;
 using System.Diagnostics;
 using Unity.Jobs.LowLevel.Unsafe;
-#if UNITY_5_5_OR_NEWER
 using UnityEngine.Profiling;
-#endif
 using System.Linq;
 
 namespace Drawing {
 	using Drawing.Text;
+	using Unity.Profiling;
 
 	public static class SharedDrawingData {
 		/// <summary>
 		/// Same as Time.time, but not updated as frequently.
 		/// Used since burst jobs cannot access Time.time.
 		/// </summary>
-		public static readonly Unity.Burst.SharedStatic<float> BurstTime = Unity.Burst.SharedStatic<float>.GetOrCreate<DrawingManager, BurstTimeKey>();
+		public static readonly Unity.Burst.SharedStatic<float> BurstTime = Unity.Burst.SharedStatic<float>.GetOrCreate<DrawingManager, BurstTimeKey>(4);
 
 		private class BurstTimeKey {}
 	}
@@ -41,15 +40,16 @@ namespace Drawing {
 	///     }
 	/// }
 	///
-	/// void Update () {
-	///     redrawScope.Draw();
+	/// void OnDestroy () {
+	///     redrawScope.Dispose();
 	/// }
 	/// </code>
 	///
-	/// See: \reflink{DrawingManager.GetRedrawScope}
+	/// See: <see cref="DrawingManager.GetRedrawScope"/>
 	/// </summary>
-	public struct RedrawScope {
-		internal DrawingData gizmos;
+	public struct RedrawScope : System.IDisposable {
+		// Stored as a GCHandle to allow storing this struct in an unmanaged ECS component or system
+		internal System.Runtime.InteropServices.GCHandle gizmos;
 		/// <summary>
 		/// ID of the scope.
 		/// Zero means no or invalid scope.
@@ -58,8 +58,13 @@ namespace Drawing {
 
 		static int idCounter = 1;
 
-		public RedrawScope (DrawingData gizmos) {
-			this.gizmos = gizmos;
+		internal RedrawScope (DrawingData gizmos, int id) {
+			this.gizmos = gizmos.gizmosHandle;
+			this.id = id;
+		}
+
+		internal RedrawScope (DrawingData gizmos) {
+			this.gizmos = gizmos.gizmosHandle;
 			// Should be enough with 4 billion ids before they wrap around.
 			id = idCounter++;
 		}
@@ -72,8 +77,37 @@ namespace Drawing {
 		/// Note: The items age will be reset. So the next frame you can call
 		/// this method again to draw the items yet again.
 		/// </summary>
-		public void Draw () {
-			if (gizmos != null) gizmos.Draw(this);
+		internal void Draw () {
+			if (gizmos.IsAllocated) {
+				if (gizmos.Target is DrawingData gizmosTarget) gizmosTarget.Draw(this);
+			}
+		}
+
+		/// <summary>
+		/// Stops keeping all previously rendered items alive, and starts a new scope.
+		/// Equivalent to first calling Dispose on the old scope and then creating a new one.
+		/// </summary>
+		public void Rewind () {
+			Dispose();
+			this = DrawingManager.GetRedrawScope();
+		}
+
+		internal void DrawUntilDispose () {
+			if (gizmos.Target is DrawingData gizmosTarget) gizmosTarget.DrawUntilDisposed(this);
+		}
+
+		/// <summary>
+		/// Dispose the redraw scope to stop rendering the items.
+		///
+		/// You must do this when you are done with the scope, even if it was never used to actually render anything.
+		/// The items will stop rendering immediately: the next camera to render will not render the items unless kept alive in some other way.
+		/// For example items are always rendered at least once.
+		/// </summary>
+		public void Dispose () {
+			if (gizmos.IsAllocated) {
+				if (gizmos.Target is DrawingData gizmosTarget) gizmosTarget.DisposeRedrawScope(this);
+			}
+			gizmos = default;
 		}
 	};
 
@@ -220,24 +254,23 @@ namespace Drawing {
 			public void SetSplitterJob (DrawingData gizmos, JobHandle splitterJob) {
 				this.splitterJob = splitterJob;
 				if (type == Type.Static) {
+					var cameraInfo = new GeometryBuilder.CameraInfo(null);
 					unsafe {
-						buildJob = CommandBuilder.Build(gizmos, (MeshBuffers*)NativeArrayUnsafeUtility.GetUnsafeBufferPointerWithoutChecks(temporaryMeshBuffers), null, splitterJob);
+						buildJob = GeometryBuilder.Build(gizmos, (MeshBuffers*)NativeArrayUnsafeUtility.GetUnsafeBufferPointerWithoutChecks(temporaryMeshBuffers), ref cameraInfo, splitterJob);
 					}
 
 					SubmittedJobs++;
 					// ScheduleBatchedJobs is expensive, so only do it once in a while
 					if (SubmittedJobs % 8 == 0) {
-						Profiler.BeginSample("ScheduleJobs");
+						MarkerScheduleJobs.Begin();
 						JobHandle.ScheduleBatchedJobs();
-						Profiler.EndSample();
+						MarkerScheduleJobs.End();
 					}
 				}
 			}
 
-			public void SchedulePersistFilter (int version, float time, int sceneModeVersion) {
+			public void SchedulePersistFilter (int version, int lastTickVersion, float time, int sceneModeVersion) {
 				if (type != Type.Persistent) throw new System.InvalidOperationException();
-
-				splitterJob.Complete();
 
 				// If data was from a different game mode then it shouldn't live any longer.
 				// E.g. editor mode => game mode
@@ -246,20 +279,23 @@ namespace Drawing {
 					return;
 				}
 
-				// If the command buffer is empty then this instance should not live longer
-				var splitterOutput = temporaryMeshBuffers[0].splitterOutput;
-				if (splitterOutput.GetLength() == 0) {
-					meta.version = -1;
-					return;
-				}
-
-				meta.version = version;
 				// Guarantee that all drawing commands survive at least one frame
-				// Don't filter them until we have drawn them once at least.
-				if (submitted) {
+				// Don't filter them until they have had the opportunity to be drawn once at least.
+				// (they may not actually have been drawn because no cameras may be active)
+				if (meta.version < lastTickVersion || submitted) {
+					splitterJob.Complete();
+					meta.version = version;
+
+					// If the command buffer is empty then this instance should not live longer
+					var splitterOutput = temporaryMeshBuffers[0].splitterOutput;
+					if (splitterOutput.Length == 0) {
+						meta.version = -1;
+						return;
+					}
+
 					buildJob.Complete();
 					unsafe {
-						splitterJob = new CommandBuilder.PersistentFilterJob {
+						splitterJob = new PersistentFilterJob {
 							buffer = &((MeshBuffers*)NativeArrayUnsafeUtility.GetUnsafePtr(temporaryMeshBuffers))->splitterOutput,
 							time = time,
 						}.Schedule(splitterJob);
@@ -277,11 +313,11 @@ namespace Drawing {
 				}
 			}
 
-			public void Schedule (DrawingData gizmos, Camera camera) {
+			public void Schedule (DrawingData gizmos, ref GeometryBuilder.CameraInfo cameraInfo) {
 				// The job for Static will already have been scheduled in SetSplitterJob
 				if (type != Type.Static) {
 					unsafe {
-						buildJob = CommandBuilder.Build(gizmos, (MeshBuffers*)NativeArrayUnsafeUtility.GetUnsafeBufferPointerWithoutChecks(temporaryMeshBuffers), camera, splitterJob);
+						buildJob = GeometryBuilder.Build(gizmos, (MeshBuffers*)NativeArrayUnsafeUtility.GetUnsafeBufferPointerWithoutChecks(temporaryMeshBuffers), ref cameraInfo, splitterJob);
 					}
 				}
 			}
@@ -290,7 +326,7 @@ namespace Drawing {
 				if (type == Type.Static && submitted) return;
 				buildJob.Complete();
 				unsafe {
-					CommandBuilder.BuildMesh(gizmos, meshes, (MeshBuffers*)temporaryMeshBuffers.GetUnsafePtr());
+					GeometryBuilder.BuildMesh(gizmos, meshes, (MeshBuffers*)temporaryMeshBuffers.GetUnsafePtr());
 				}
 				submitted = true;
 			}
@@ -299,7 +335,7 @@ namespace Drawing {
 				var itemMeshes = this.meshes;
 				var customMeshIndex = 0;
 				var capturedState = temporaryMeshBuffers[0].capturedState;
-				var maxCustomMeshes = capturedState.GetLength() / UnsafeUtility.SizeOf<CapturedState>();
+				var maxCustomMeshes = capturedState.Length / UnsafeUtility.SizeOf<CapturedState>();
 
 				for (int i = 0; i < itemMeshes.Count; i++) {
 					Color color;
@@ -517,7 +553,7 @@ namespace Drawing {
 				bool any = false;
 
 				for (int i = 0; i < numBuffers; i++) {
-					any |= buffers[i].GetLength() > 0;
+					any |= buffers[i].Length > 0;
 				}
 				return any;
 			}
@@ -579,7 +615,7 @@ namespace Drawing {
 				int persistentBuffer = gizmos.processedData.Reserve(ProcessedBuilderData.Type.Persistent, tmpMeta);
 
 				unsafe {
-					splitterJob = new CommandBuilder.StreamSplitter {
+					splitterJob = new StreamSplitter {
 						inputBuffers = commandBuffers,
 						staticBuffer = gizmos.processedData.Get(staticBuffer).splitterOutputPtr,
 						dynamicBuffer = gizmos.processedData.Get(dynamicBuffer).splitterOutputPtr,
@@ -708,9 +744,9 @@ namespace Drawing {
 			public void DisposeCommandBuildersWithJobDependencies (DrawingData gizmos) {
 				if (data == null) return;
 				for (int i = 0; i < data.Length; i++) data[i].CheckJobDependency(gizmos, false);
-				Profiler.BeginSample("Awaiting user dependencies");
+				MarkerAwaitUserDependencies.Begin();
 				for (int i = 0; i < data.Length; i++) data[i].CheckJobDependency(gizmos, true);
-				Profiler.EndSample();
+				MarkerAwaitUserDependencies.End();
 			}
 
 			public void ReleaseAllUnused () {
@@ -786,27 +822,28 @@ namespace Drawing {
 
 			public void SubmitMeshes (DrawingData gizmos, Camera camera, int versionThreshold, bool allowGizmos, bool allowCameraDefault) {
 				if (data == null) return;
-				Profiler.BeginSample("Schedule");
+				MarkerSchedule.Begin();
+				var cameraInfo = new GeometryBuilder.CameraInfo(camera);
 				int c = 0;
 				for (int i = 0; i < data.Length; i++) {
 					if (data[i].isValid && data[i].meta.version >= versionThreshold && data[i].IsValidForCamera(camera, allowGizmos, allowCameraDefault)) {
 						c++;
-						data[i].Schedule(gizmos, camera);
+						data[i].Schedule(gizmos, ref cameraInfo);
 					}
 				}
 
-				Profiler.EndSample();
+				MarkerSchedule.End();
 
 				// Ensure all jobs start to be executed on the worker threads now
 				JobHandle.ScheduleBatchedJobs();
 
-				Profiler.BeginSample("Build");
+				MarkerBuild.Begin();
 				for (int i = 0; i < data.Length; i++) {
 					if (data[i].isValid && data[i].meta.version >= versionThreshold && data[i].IsValidForCamera(camera, allowGizmos, allowCameraDefault)) {
 						data[i].BuildMeshes(gizmos);
 					}
 				}
-				Profiler.EndSample();
+				MarkerBuild.End();
 			}
 
 			/// <summary>
@@ -815,13 +852,13 @@ namespace Drawing {
 			/// </summary>
 			public void PoolDynamicMeshes (DrawingData gizmos) {
 				if (data == null) return;
-				Profiler.BeginSample("Pool");
+				MarkerPool.Begin();
 				for (int i = 0; i < data.Length; i++) {
 					if (data[i].isValid) {
 						data[i].PoolDynamicMeshes(gizmos);
 					}
 				}
-				Profiler.EndSample();
+				MarkerPool.End();
 			}
 
 			public void CollectMeshes (int versionThreshold, List<RenderedMeshWithType> meshes, Camera camera, bool allowGizmos, bool allowCameraDefault) {
@@ -833,11 +870,11 @@ namespace Drawing {
 				}
 			}
 
-			public void FilterOldPersistentCommands (int version, float time, int sceneModeVersion) {
+			public void FilterOldPersistentCommands (int version, int lastTickVersion, float time, int sceneModeVersion) {
 				if (data == null) return;
 				for (int i = 0; i < data.Length; i++) {
 					if (data[i].isValid && data[i].type == ProcessedBuilderData.Type.Persistent) {
-						data[i].SchedulePersistFilter(version, time, sceneModeVersion);
+						data[i].SchedulePersistFilter(version, lastTickVersion, time, sceneModeVersion);
 					}
 				}
 			}
@@ -918,15 +955,17 @@ namespace Drawing {
 			}
 		}
 
+		[System.Flags]
 		internal enum MeshType {
-			Lines = 1 << 0,
-			Solid = 1 << 1,
+			Solid = 1 << 0,
+			Lines = 1 << 1,
 			Text = 1 << 2,
 			// Set if the mesh is not a built-in mesh. These may have non-identity matrices set.
 			Custom = 1 << 3,
 			// If set for a custom mesh, the mesh will be pooled.
 			// This is used for temporary custom meshes that are created by ALINE
 			Pool = 1 << 4,
+			BaseType = Solid | Lines | Text,
 		}
 
 		internal struct MeshWithType {
@@ -1071,7 +1110,7 @@ namespace Drawing {
 			return new CommandBuilder(this, Hasher.NotSupplied, frameRedrawScope, default, !renderInGame, false, adjustedSceneModeVersion);
 		}
 
-		public CommandBuilder GetBuiltInBuilder (bool renderInGame = false) {
+		internal CommandBuilder GetBuiltInBuilder (bool renderInGame = false) {
 			UpdateTime();
 			return new CommandBuilder(this, Hasher.NotSupplied, frameRedrawScope, default, !renderInGame, true, adjustedSceneModeVersion);
 		}
@@ -1116,6 +1155,12 @@ namespace Drawing {
 		public int version { get; private set; } = 1;
 		int lastTickVersion;
 		int lastTickVersion2;
+		HashSet<int> persistentRedrawScopes = new HashSet<int>();
+#if ALINE_TRACK_REDRAW_SCOPE_LEAKS
+		Dictionary<int, String> persistentRedrawScopeInfos = new Dictionary<int, String>();
+		Dictionary<int, int> persistentRedrawScopeLastValidVersion = new Dictionary<int, int>();
+#endif
+		internal System.Runtime.InteropServices.GCHandle gizmosHandle;
 
 		public RedrawScope frameRedrawScope;
 
@@ -1126,8 +1171,66 @@ namespace Drawing {
 
 		Dictionary<Camera, Range> cameraVersions = new Dictionary<Camera, Range>();
 
+		internal static readonly ProfilerMarker MarkerScheduleJobs = new ProfilerMarker("ScheduleJobs");
+		internal static readonly ProfilerMarker MarkerAwaitUserDependencies = new ProfilerMarker("Await user dependencies");
+		internal static readonly ProfilerMarker MarkerSchedule = new ProfilerMarker("Schedule");
+		internal static readonly ProfilerMarker MarkerBuild = new ProfilerMarker("Build");
+		internal static readonly ProfilerMarker MarkerPool = new ProfilerMarker("Pool");
+		internal static readonly ProfilerMarker MarkerRelease = new ProfilerMarker("Release");
+		internal static readonly ProfilerMarker MarkerBuildMeshes = new ProfilerMarker("Build Meshes");
+		internal static readonly ProfilerMarker MarkerCollectMeshes = new ProfilerMarker("Collect Meshes");
+		internal static readonly ProfilerMarker MarkerSortMeshes = new ProfilerMarker("Sort Meshes");
+		internal static readonly ProfilerMarker LeakTracking = new ProfilerMarker("RedrawScope Leak Tracking");
+
 		void DiscardData (Hasher hasher) {
 			processedData.ReleaseAllWithHash(this, hasher);
+		}
+
+		internal void OnChangingPlayMode () {
+			sceneModeVersion++;
+
+#if UNITY_EDITOR
+			// If we are in the editor, we schedule a callback to check if any RedrawScope objects were not disposed.
+			// OnChangingPlayMode will run before the scene is destroyed. So we know that any persistent redraw scopes
+			// that are alive right now should be destroyed soon.
+			// We wait a few updates to allow the scene to be destroyed before we check for leaks.
+			// EditorApplication.delayCall may be called before the scene has actually been destroyed.
+			// Usually it has, but in particular if the user double-clicks the play button to start and then immediately
+			// stop the game, then it may run before the scene has been destroyed.
+			var shouldBeDestroyed = this.persistentRedrawScopes.ToArray();
+			UnityEditor.EditorApplication.CallbackFunction checkLeaks = null;
+			int remainingFrames = 2;
+			checkLeaks = () => {
+				if (remainingFrames > 0) {
+					remainingFrames--;
+					return;
+				}
+				UnityEditor.EditorApplication.delayCall -= checkLeaks;
+				int leaked = 0;
+				foreach (var v in shouldBeDestroyed) {
+					if (persistentRedrawScopes.Contains(v)) leaked++;
+				}
+				if (leaked > 0) {
+#if ALINE_TRACK_REDRAW_SCOPE_LEAKS
+					UnityEngine.Debug.LogError(leaked + " RedrawScope objects were not disposed. Make sure to dispose them when you are done with them, otherwise this will lead to a memory leak and potentially a performance issue.");
+					foreach (var v in shouldBeDestroyed) {
+						if (persistentRedrawScopes.Contains(v)) {
+							UnityEngine.Debug.LogError("RedrawScope leaked. Allocated from:\n" + persistentRedrawScopeInfos[v]);
+						}
+					}
+#else
+					UnityEngine.Debug.LogError(leaked + " RedrawScope objects were not disposed. Make sure to dispose them when you are done with them, otherwise this will lead to a memory leak and potentially a performance issue.\nEnable ALINE_TRACK_REDRAW_SCOPE_LEAKS in the scripting define symbols to track the leaks more accurately.");
+#endif
+					foreach (var v in shouldBeDestroyed) {
+						persistentRedrawScopes.Remove(v);
+#if ALINE_TRACK_REDRAW_SCOPE_LEAKS
+						persistentRedrawScopeInfos.Remove(v);
+#endif
+					}
+				}
+			};
+			UnityEditor.EditorApplication.delayCall += checkLeaks;
+#endif
 		}
 
 		/// <summary>
@@ -1155,21 +1258,47 @@ namespace Drawing {
 		}
 
 		/// <summary>Schedules all meshes that were drawn the last frame with this redraw scope to be drawn again</summary>
-		public void Draw (RedrawScope scope) {
+		internal void Draw (RedrawScope scope) {
 			if (scope.id != 0) processedData.SetVersion(scope, version);
 		}
 
-		public void TickFrame () {
+		internal void DrawUntilDisposed (RedrawScope scope) {
+			if (scope.id != 0) {
+				Draw(scope);
+				persistentRedrawScopes.Add(scope.id);
+#if ALINE_TRACK_REDRAW_SCOPE_LEAKS && UNITY_EDITOR
+				LeakTracking.Begin();
+				persistentRedrawScopeInfos[scope.id] = new System.Diagnostics.StackTrace().ToString();
+				persistentRedrawScopeLastValidVersion[scope.id] = sceneModeVersion;
+				LeakTracking.End();
+#endif
+			}
+		}
+
+		internal void DisposeRedrawScope (RedrawScope scope) {
+			if (scope.id != 0) {
+				processedData.SetVersion(scope, -1);
+				persistentRedrawScopes.Remove(scope.id);
+#if ALINE_TRACK_REDRAW_SCOPE_LEAKS && UNITY_EDITOR
+				persistentRedrawScopeInfos.Remove(scope.id);
+#endif
+			}
+		}
+
+		public void TickFramePreRender () {
 			data.DisposeCommandBuildersWithJobDependencies(this);
+			// Remove persistent commands that have timed out.
+			// When not playing then persistent commands are never drawn twice
+			processedData.FilterOldPersistentCommands(version, lastTickVersion, CurrentTime, adjustedSceneModeVersion);
+			foreach (var scopeId in persistentRedrawScopes) {
+				processedData.SetVersion(new RedrawScope(this, scopeId), version);
+			}
+
 			// All cameras rendered between the last tick and this one will have
 			// a version that is at least lastTickVersion + 1.
 			// However the user may want to reuse meshes from the previous frame (see Draw(Hasher)).
 			// This requires us to keep data from one more frame and thus we use lastTickVersion2 + 1
 			// TODO: One frame should be enough, right?
-			data.ReleaseAllUnused();
-			// Remove persistent commands that have timed out.
-			// When not playing then persistent commands are never drawn twice
-			processedData.FilterOldPersistentCommands(version, CurrentTime, adjustedSceneModeVersion);
 			processedData.ReleaseDataOlderThan(this, lastTickVersion2 + 1);
 			lastTickVersion2 = lastTickVersion;
 			lastTickVersion = version;
@@ -1206,9 +1335,19 @@ namespace Drawing {
 			// TODO: Filter cameraVersions to avoid memory leak
 		}
 
+		public void PostRenderCleanup () {
+			MarkerRelease.Begin();
+			data.ReleaseAllUnused();
+			MarkerRelease.End();
+			version++;
+		}
+
 		class MeshCompareByDrawingOrder : IComparer<RenderedMeshWithType> {
 			public int Compare (RenderedMeshWithType a, RenderedMeshWithType b) {
-				return a.drawingOrderIndex - b.drawingOrderIndex;
+				// Extract if the meshes are Solid/Lines/Text
+				var ta = (int)a.type & 0x7;
+				var tb = (int)b.type & 0x7;
+				return ta != tb ? ta - tb : a.drawingOrderIndex - b.drawingOrderIndex;
 			}
 		}
 
@@ -1237,6 +1376,7 @@ namespace Drawing {
 		}
 
 		public DrawingData() {
+			gizmosHandle = System.Runtime.InteropServices.GCHandle.Alloc(this, System.Runtime.InteropServices.GCHandleType.Weak);
 			LoadMaterials();
 		}
 
@@ -1302,23 +1442,30 @@ namespace Drawing {
 			// rendering many frames when outside of play mode.
 			cameraRenderingRange.start = Mathf.Max(cameraRenderingRange.start, lastTickVersion2 + 1);
 
+#if UNITY_2023_1_OR_NEWER
+			bool skipDueToWireframe = false;
+			commandBuffer.SetWireframe(false);
+#else
 			// If GL.wireframe is enabled (the Wireframe mode in the scene view settings)
 			// then I have found no way to draw gizmos in a good way.
 			// It's best to disable gizmos altogether to avoid drawing wireframe versions of gizmo meshes.
-			if (!GL.wireframe) {
-				Profiler.BeginSample("Build Meshes");
+			bool skipDueToWireframe = GL.wireframe;
+#endif
+
+			if (!skipDueToWireframe) {
+				MarkerBuildMeshes.Begin();
 				processedData.SubmitMeshes(this, cam, cameraRenderingRange.start, allowGizmos, allowCameraDefault);
-				Profiler.EndSample();
-				Profiler.BeginSample("Collect Meshes");
+				MarkerBuildMeshes.End();
+				MarkerCollectMeshes.Begin();
 				meshes.Clear();
 				processedData.CollectMeshes(cameraRenderingRange.start, meshes, cam, allowGizmos, allowCameraDefault);
 				processedData.PoolDynamicMeshes(this);
-				Profiler.EndSample();
-				Profiler.BeginSample("Sorting Meshes");
+				MarkerCollectMeshes.End();
+				MarkerSortMeshes.Begin();
 				// Note that a stable sort is required as some meshes may have the same sorting index
 				// but those meshes will have a consistent ordering between them in the list
 				meshes.Sort(meshSorter);
-				Profiler.EndSample();
+				MarkerSortMeshes.End();
 
 				int colorID = Shader.PropertyToID("_Color");
 				int colorFadeID = Shader.PropertyToID("_FadeColor");
@@ -1330,48 +1477,59 @@ namespace Drawing {
 				var textBaseColor = new Color(1, 1, 1, settings.textOpacity);
 				var textFadeColor = new Color(1, 1, 1, settings.textOpacityBehindObjects);
 
-				// First surfaces, then lines
-				for (int matIndex = 0; matIndex <= 2; matIndex++) {
-					var mat = matIndex == 0 ? surfaceMaterial : (matIndex == 1 ? lineMaterial : fontData.material);
-					var meshType = matIndex == 0 ? MeshType.Solid : (matIndex == 1 ? MeshType.Lines : MeshType.Text);
+				// The meshes list is already sorted as first surfaces, then lines, then text
+				for (int i = 0; i < meshes.Count;) {
+					int meshEndIndex = i+1;
+					var tp = meshes[i].type & MeshType.BaseType;
+					while (meshEndIndex < meshes.Count && (meshes[meshEndIndex].type & MeshType.BaseType) == tp) meshEndIndex++;
+
+					Material mat;
 					customMaterialProperties.Clear();
-					if (matIndex == 0) {
+					switch (tp) {
+					case MeshType.Solid:
+						mat = surfaceMaterial;
 						customMaterialProperties.SetColor(colorID, solidBaseColor);
 						customMaterialProperties.SetColor(colorFadeID, solidFadeColor);
-					} else if (matIndex == 1) {
+						break;
+					case MeshType.Lines:
+						mat = lineMaterial;
 						customMaterialProperties.SetColor(colorID, lineBaseColor);
 						customMaterialProperties.SetColor(colorFadeID, lineFadeColor);
-					} else if (matIndex == 2) {
+						break;
+					case MeshType.Text:
+						mat = fontData.material;
 						customMaterialProperties.SetColor(colorID, textBaseColor);
 						customMaterialProperties.SetColor(colorFadeID, textFadeColor);
+						break;
+					default:
+						throw new System.InvalidOperationException("Invalid mesh type");
 					}
 
 					for (int pass = 0; pass < mat.passCount; pass++) {
-						for (int i = 0; i < meshes.Count; i++) {
-							var mesh = meshes[i];
-							if ((mesh.type & meshType) != 0) {
-								if ((mesh.type & MeshType.Custom) != 0) {
-									// This mesh type may have a matrix set. So we need to handle that
-									if (GeometryUtility.TestPlanesAABB(planes, TransformBoundingBox(mesh.matrix, mesh.mesh.bounds))) {
-										// Custom meshes may have different colors
-										customMaterialProperties.SetColor(colorID, solidBaseColor * mesh.color);
-										commandBuffer.DrawMesh(mesh.mesh, mesh.matrix, mat, 0, pass, customMaterialProperties);
-										customMaterialProperties.SetColor(colorID, solidBaseColor);
-									}
-								} else if (GeometryUtility.TestPlanesAABB(planes, mesh.mesh.bounds)) {
-									// This mesh is drawn with an identity matrix
-									commandBuffer.DrawMesh(mesh.mesh, Matrix4x4.identity, mat, 0, pass, customMaterialProperties);
+						for (int j = i; j < meshEndIndex; j++) {
+							var mesh = meshes[j];
+							if ((mesh.type & MeshType.Custom) != 0) {
+								// This mesh type may have a matrix set. So we need to handle that
+								if (GeometryUtility.TestPlanesAABB(planes, TransformBoundingBox(mesh.matrix, mesh.mesh.bounds))) {
+									// Custom meshes may have different colors
+									customMaterialProperties.SetColor(colorID, solidBaseColor * mesh.color);
+									commandBuffer.DrawMesh(mesh.mesh, mesh.matrix, mat, 0, pass, customMaterialProperties);
+									customMaterialProperties.SetColor(colorID, solidBaseColor);
 								}
+							} else if (GeometryUtility.TestPlanesAABB(planes, mesh.mesh.bounds)) {
+								// This mesh is drawn with an identity matrix
+								commandBuffer.DrawMesh(mesh.mesh, Matrix4x4.identity, mat, 0, pass, customMaterialProperties);
 							}
 						}
 					}
+
+					i = meshEndIndex;
 				}
 
 				meshes.Clear();
 			}
 
 			cameraVersions[cam] = cameraRenderingRange;
-			version++;
 		}
 
 		/// <summary>Returns a new axis aligned bounding box that contains the given bounding box after being transformed by the matrix</summary>
@@ -1400,6 +1558,7 @@ namespace Drawing {
 		/// Used to make sure that no memory leaks happen in the Unity Editor.
 		/// </summary>
 		public void ClearData () {
+			gizmosHandle.Free();
 			data.Dispose();
 			processedData.Dispose(this);
 

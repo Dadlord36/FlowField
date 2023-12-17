@@ -26,10 +26,6 @@ namespace DOTS.Jobs
 
         private void Execute(RefRO<CellIndexComponent> cellIndexComponent)
         {
-            if (cellIndexComponent.ValueRO.IsValid == false)
-            {
-                return;
-            }
             float3 cellCenter = GridCalculations.GetCellCenterAt(gridParameters, cellIndexComponent.ValueRO.index);
             drawingCommandBuilder.SolidPlane(cellCenter, quaternion.identity, gridParameters.cellSize, Color.red);
         }

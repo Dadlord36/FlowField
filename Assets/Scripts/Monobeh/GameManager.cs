@@ -10,9 +10,12 @@ namespace Monobeh
         {
             EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
             {
-                var systemHandle = entityManager.World.GetOrCreateSystemManaged<MainSpawnSystem>();
+                World world = entityManager.World;
+                var systemHandle = world.GetOrCreateSystemManaged<MainSpawnSystem>();
                 systemHandle.Update();
                 entityManager.World.DestroySystemManaged(systemHandle);
+                
+               // SystemHandle  systemHandle2 = World.DefaultGameObjectInjectionWorld.CreateSystem<CylinderSurfacePositioningSystem>();
             }
 
             Destroy(gameObject);

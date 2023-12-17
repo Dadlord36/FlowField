@@ -7,14 +7,12 @@ namespace DOTS.Components
     [BurstCompile]
     public struct CellIndexComponent : IComponentData
     {
-        public static readonly CellIndexComponent Invalid = new CellIndexComponent {index = new int2(-1, -1)};
-        public int2 index;
+        public static readonly CellIndexComponent Empty = new CellIndexComponent { index = uint2.zero };
+        public uint2 index;
 
-        public CellIndexComponent(int2 index)
+        public CellIndexComponent(uint2 index)
         {
             this.index = index;
         }
-
-        public bool IsValid => index.x >= 0 && index.y >= 0;
     }
 }

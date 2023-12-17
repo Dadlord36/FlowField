@@ -1,3 +1,51 @@
+## 1.7.1 (2023-11-14)
+    - Removed "com.unity.jobs" as a dependency, since it has been replaced by the collections package.
+    - Added support for rendering gizmos while the scene view is in wireframe mode. This is supported in Unity 2023.1 and up.
+    - Added \reflink{CommandBuilder.DashedLine}.
+        \shadowimage{rendered/dashedline.png}
+    - Added \reflink{CommandBuilder.DashedPolyline}.
+        \shadowimage{rendered/dashedpolyline.png}
+
+## 1.7.0 (2023-10-17)
+    - Added a much more ergonomic way to draw using 2D coordinates. Take a look at \ref 2d-drawing for more info.
+        \shadowimage{rendered/drawxy@8x.png}
+    - Deprecated several methods like \reflink{Draw.CircleXY} and \reflink{Draw.CircleXZ} to instead use the new 2D methods (Draw.xy.Circle and Draw.xz.Circle).
+        The old ones will continue to work for the time being, but they will be removed in a future update.
+    - Removed some shader code which was not supported on WebGL.
+    - Added \reflink{CommandBuilder2D.WirePill}
+        \shadowimage{rendered/wirepill.png}
+    - Added \reflink{CommandBuilder.SolidTriangle}
+        \shadowimage{rendered/solidtriangle.png}
+    - Added an overload of \reflink{Draw.Polyline} which takes an IReadOnlyList<T>.
+    - Added \reflink{CommandBuilder.PolylineWithSymbol}
+        \shadowimage{rendered/polylinewithsymbol.png}
+    - Added an overload of \reflink{CommandBuilder.WireMesh} that takes a NativeArray with vertices, and one with triangles.
+    - Improved look of \reflink{Draw.ArrowheadArc} when using a line width greater than 1.
+    - Improved performance when there are lots of objects in the scene inheriting from \reflink{MonoBehaviourGizmos}.
+    - Significantly reduced main-thread load when drawing in many situations by improving the Color to Color32 conversion performance.
+        Turns out Unity's built-in one is not the fastest.
+        In Burst I've cranked it up even more by using a SIMDed conversion function.
+        Common improvements are around 10% faster, but in tight loops it can be up to 50% faster.
+    - Improved performance of \reflink{Draw.WireBox}.
+    - Improved performance of drawing circles and arcs.
+    - Fixed name collision when both the A* Pathfinding Project and ALINE were installed in a project. This could cause the warning "There are 2 settings providers with the same name Project/ALINE." to be logged to the console.
+    - Fixed Draw.WireBox reserving the wrong amount of memory, which could lead to an exception being thrown.
+    - Fixed lines would be drawn slightly incorrectly at very shallow camera angles.
+    - Fixed a memory leak which could happen if the game was not running, and the scene view was not being re-rendered, and a script was queuing drawing commands from an editor script repeatedly.
+        Drawing commands will now get discarded after 10 seconds if no rendering happens to avoid leaking memory indefinitely.
+    - Fixed a memory leak which could happen if the game was not running in the editor, and no cameras were being rendered (e.g. on a server).
+    - Fixed shader compilation errors when deploying for PlayStation 5.
+    - Fixed circles with a normal of exactly (0,-1,0) would not be rendered.
+    - Changed \reflink{RedrawScope} to continue drawing items until it is disposed, instead of requiring one to call the scope.Draw method every frame.
+    - Allow a \reflink{RedrawScope} to be stored in unmanaged ECS components and systems.
+    - Fixed \reflink{Draw.Arrow} would draw a slightly narrower arrow head when the line was pointed in certain directions.
+    - Added an overload for 3x3 matrices: \reflink{Draw.WithMatrix(float3x3)}.
+    - Changed the behaviour for \reflink{RedrawScope}s. Previously they would continue drawing as long as you called RedrawScope.Draw every frame.
+        Now they will continue drawing until you dispose them. This makes them just nicer to use for most cases.
+        This is a breaking change, but since RedrawSopes have so far been a completely undocumented feature, I expect that no, or very few people, use them.
+    - Fixed compatibility with XBox.
+    - Fixed only the base camera in a camera stack would render gizmos.
+
 ## 1.6.4 (2022-09-17)
     - \reflink{CommandBuilder.DisposeAfter} will now block on the given dependency before rendering the current frame by default.
         This reduces the risk of flickering when using ECS systems as they may otherwise not have completed their work before the frame is rendered.

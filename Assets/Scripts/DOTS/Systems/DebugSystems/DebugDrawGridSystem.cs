@@ -10,7 +10,7 @@ using Unity.Mathematics;
 using Unity.Rendering;
 using UnityEngine;
 
-namespace DOTS.Systems
+namespace DOTS.Systems.DebugSystems
 {
     [UpdateInGroup(typeof(UpdatePresentationSystemGroup))]
     [DisableAutoCreation]
@@ -40,7 +40,7 @@ namespace DOTS.Systems
 
             void IJobParallelFor.Execute(int index)
             {
-                float3 cellCenter = GridCalculations.GetCellCenterAt(gridParameters, index);
+                float3 cellCenter = GridCalculations.GetCellCenterAt(gridParameters, (uint)index);
                 var flowVector = new float3(flowMap[index].x, 0, flowMap[index].y);
                 drawingCommandBuilder.Arrow(cellCenter, cellCenter + flowVector, Color.red);
             }
@@ -62,8 +62,8 @@ namespace DOTS.Systems
             JobHandle drawGridJob = new DrawGridJob
             {
                 gridCenter = gridParameters.gridCenter,
-                cellsNumber = gridParameters.cellsRowNumber,
-                gridTotalSize = gridParameters.gridTotalSize,
+                cellsNumber = gridParameters.rowNumber,
+                gridTotalSize = gridParameters.gridSize,
                 drawingCommandBuilder = drawingBuilder
             }.Schedule();
 

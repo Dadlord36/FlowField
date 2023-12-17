@@ -5,7 +5,7 @@ using Unity.Entities;
 namespace DOTS.Components
 {
     [BurstCompile]
-    public struct CylinderParametersComponent : IComponentData
+    public struct CylinderParametersComponent : ISharedComponentData
     {
         public CylinderParameters cylinderParameters;
     }

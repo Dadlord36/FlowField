@@ -9,8 +9,7 @@ using Unity.Mathematics;
 using Unity.Rendering;
 using UnityEngine;
 
-
-namespace DOTS.Systems
+namespace DOTS.Systems.DebugSystems
 {
     [UpdateInGroup(typeof(UpdatePresentationSystemGroup))]
     public partial struct DebugDrawCylinderSystem : ISystem
@@ -45,20 +44,20 @@ namespace DOTS.Systems
 
         public void OnUpdate(ref SystemState state)
         {
-            CommandBuilder drawingBuilder = DrawingManager.GetBuilder(true);
+            /*CommandBuilder drawingBuilder = DrawingManager.GetBuilder(true);
             var cylinderParametersComponent = SystemAPI.GetSingleton<CylinderParametersComponent>();
             var gridParametersComponent = SystemAPI.GetSingleton<GridParametersComponent>();
             ref GridParameters gridParameters = ref gridParametersComponent.gridParameters;
 
             JobHandle drawCylinderJobHandle =
                 new DrawCylinderJob(cylinderParametersComponent.cylinderParameters, drawingBuilder).Schedule(state.Dependency);
-            JobHandle drawCellsOnCylinderJobHandle =
+            /*JobHandle drawCellsOnCylinderJobHandle =
                 new DrawOccupiedCellOnCylinderJob(drawingBuilder, gridParameters, cylinderParametersComponent.cylinderParameters).ScheduleParallel(
-                    drawCylinderJobHandle);
+                    drawCylinderJobHandle);#1#
 
-            drawingBuilder.DisposeAfter(drawCellsOnCylinderJobHandle);
+            drawingBuilder.DisposeAfter(drawCylinderJobHandle);
 
-            state.CompleteDependency();
+            state.CompleteDependency();*/
         }
 
         [BurstCompile]

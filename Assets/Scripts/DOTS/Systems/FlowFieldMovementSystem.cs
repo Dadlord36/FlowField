@@ -1,15 +1,34 @@
-﻿using DOTS.Components;
+﻿using System.Runtime.InteropServices;
+using DOTS.Components;
 using DOTS.Components.Tags;
 using Unity.Burst;
+using Unity.Collections;
 using Unity.Entities;
-using Unity.Mathematics;
 
 namespace DOTS.Systems
 {
     [UpdateInGroup(typeof(InitializationSystemGroup))]
     [UpdateAfter(typeof(CellRelationSystem))]
+    [UpdateBefore(typeof(CylinderVelocityConvertingSystem))]
     public partial struct FlowFieldMovementSystem : ISystem
     {
+        [BurstCompile]
+        [StructLayout(LayoutKind.Auto)]
+        private partial struct FlowFieldMovementJob : IJobEntity
+        {
+            [ReadOnly] private readonly FlowMapComponent _flowMapComponent;
+
+            public FlowFieldMovementJob(in FlowMapComponent flowMapComponent) : this()
+            {
+                _flowMapComponent = flowMapComponent;
+            }
+
+            private void Execute(RefRW<FlowFieldVelocityComponent> flowFieldVelocityComponent, RefRO<CellIndexComponent> cellIndexComponent)
+            {
+                flowFieldVelocityComponent.ValueRW.flowVelocity = _flowMapComponent.flowMap[cellIndexComponent.ValueRO.index];
+            }
+        }
+
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
@@ -22,15 +41,8 @@ namespace DOTS.Systems
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            RefRW<FlowMapComponent> flowMapComponent = SystemAPI.GetSingletonRW<FlowMapComponent>();
-
-            foreach (var (cellIndexComponent, flowFieldVelocity)
-                     in SystemAPI.Query<RefRO<CellIndexComponent>, RefRW<FlowFieldVelocityComponent>>())
-            {
-                flowFieldVelocity.ValueRW.flowVelocity = cellIndexComponent.ValueRO.IsValid
-                    ? flowMapComponent.ValueRO.flowMap[cellIndexComponent.ValueRO.index]
-                    : float2.zero;
-            }
+            state.Dependency = new FlowFieldMovementJob(SystemAPI.GetSingletonRW<FlowMapComponent>().ValueRO).ScheduleParallel(state.Dependency);
+            state.CompleteDependency();
         }
 
         [BurstCompile]

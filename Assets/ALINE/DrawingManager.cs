@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine.Rendering;
+using Unity.Profiling;
 #if MODULE_RENDER_PIPELINES_UNIVERSAL
 using UnityEngine.Rendering.Universal;
 #endif
@@ -27,17 +28,37 @@ namespace Drawing {
 		static HashSet<Transform> selectedTransforms = new HashSet<Transform>();
 
 		static internal bool drawingGizmos;
+		static internal bool dirty;
+		private static int selectionSizeInternal;
 
 		/// <summary>Number of top-level transforms that are selected</summary>
-		public static int selectionSize { get; private set; }
+		public static int selectionSize {
+			get {
+				Refresh();
+				return selectionSizeInternal;
+			}
+			private set {
+				selectionSizeInternal = value;
+			}
+		}
 
-		internal static void Refresh () {
+		internal static void SetDirty () {
+			dirty = true;
+		}
+
+		private static void Refresh () {
 #if UNITY_EDITOR
-			activeTransform = Selection.activeTransform;
-			selectedTransforms.Clear();
-			var topLevel = Selection.transforms;
-			for (int i = 0; i < topLevel.Length; i++) selectedTransforms.Add(topLevel[i]);
-			selectionSize = topLevel.Length;
+			if (!drawingGizmos) throw new System.Exception("Can only be used inside the ALINE library's gizmo drawing functions.");
+			if (dirty) {
+				dirty = false;
+				DrawingManager.MarkerRefreshSelectionCache.Begin();
+				activeTransform = Selection.activeTransform;
+				selectedTransforms.Clear();
+				var topLevel = Selection.transforms;
+				for (int i = 0; i < topLevel.Length; i++) selectedTransforms.Add(topLevel[i]);
+				selectionSize = topLevel.Length;
+				DrawingManager.MarkerRefreshSelectionCache.End();
+			}
 #endif
 		}
 
@@ -46,7 +67,6 @@ namespace Drawing {
 		/// This is a deep selection: even children of selected transforms are considered to be selected.
 		/// </summary>
 		public static bool InSelection (Component c) {
-			if (!drawingGizmos) throw new System.Exception("Can only be used inside the ALINE library's gizmo drawing functions.");
 			return InSelection(c.transform);
 		}
 
@@ -55,7 +75,7 @@ namespace Drawing {
 		/// This is a deep selection: even children of selected transforms are considered to be selected.
 		/// </summary>
 		public static bool InSelection (Transform tr) {
-			if (!drawingGizmos) throw new System.Exception("Can only be used inside the ALINE library's gizmo drawing functions.");
+			Refresh();
 			var leaf = tr;
 			while (tr != null) {
 				if (selectedTransforms.Contains(tr)) {
@@ -72,7 +92,6 @@ namespace Drawing {
 		/// The active selection is the GameObject that is currently visible in the inspector.
 		/// </summary>
 		public static bool InActiveSelection (Component c) {
-			if (!drawingGizmos) throw new System.Exception("Can only be used inside the ALINE library's gizmo drawing functions.");
 			return InActiveSelection(c.transform);
 		}
 
@@ -82,7 +101,7 @@ namespace Drawing {
 		/// </summary>
 		public static bool InActiveSelection (Transform tr) {
 #if UNITY_EDITOR
-			if (!drawingGizmos) throw new System.Exception("Can only be used inside the ALINE library's gizmo drawing functions.");
+			Refresh();
 			return tr.transform == activeTransform;
 #else
 			return false;
@@ -118,9 +137,11 @@ namespace Drawing {
 	public class DrawingManager : MonoBehaviour {
 		public DrawingData gizmos;
 		static List<IDrawGizmos> gizmoDrawers = new List<IDrawGizmos>();
+		static HashSet<System.Type> gizmoDrawerTypes = new HashSet<System.Type>();
 		static DrawingManager _instance;
 		bool framePassed;
 		int lastFrameCount = int.MinValue;
+		float lastFrameTime = -float.NegativeInfinity;
 #if UNITY_EDITOR
 		bool builtGizmos;
 #endif
@@ -150,6 +171,15 @@ namespace Drawing {
 		HashSet<ScriptableRenderer> scriptableRenderersWithPass = new HashSet<ScriptableRenderer>();
 		AlineURPRenderPassFeature renderPassFeature;
 #endif
+
+		private static readonly ProfilerMarker MarkerALINE = new ProfilerMarker("ALINE");
+		private static readonly ProfilerMarker MarkerCommandBuffer = new ProfilerMarker("Executing command buffer");
+		private static readonly ProfilerMarker MarkerFrameTick = new ProfilerMarker("Frame Tick");
+		private static readonly ProfilerMarker MarkerFilterDestroyedObjects = new ProfilerMarker("Filter destroyed objects");
+		internal static readonly ProfilerMarker MarkerRefreshSelectionCache = new ProfilerMarker("Refresh Selection Cache");
+		private static readonly ProfilerMarker MarkerGizmosAllowed = new ProfilerMarker("GizmosAllowed");
+		private static readonly ProfilerMarker MarkerDrawGizmos = new ProfilerMarker("DrawGizmos");
+		private static readonly ProfilerMarker MarkerSubmitGizmos = new ProfilerMarker("Submit Gizmos");
 
 		public static DrawingManager instance {
 			get {
@@ -227,7 +257,7 @@ namespace Drawing {
 
 		void OnPlayModeStateChanged (PlayModeStateChange change) {
 			if (change == PlayModeStateChange.ExitingEditMode || change == PlayModeStateChange.ExitingPlayMode) {
-				gizmos.sceneModeVersion++;
+				gizmos.OnChangingPlayMode();
 			}
 		}
 #endif
@@ -259,28 +289,28 @@ namespace Drawing {
 			Camera.onPostRender += PostRender;
 			// Callback when rendering with a scriptable render pipeline
 			UnityEngine.Rendering.RenderPipelineManager.beginFrameRendering += BeginFrameRendering;
+			UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering += BeginCameraRendering;
 			UnityEngine.Rendering.RenderPipelineManager.endCameraRendering += EndCameraRendering;
 #if UNITY_EDITOR
-			EditorApplication.update += OnUpdate;
+			EditorApplication.update += OnEditorUpdate;
 			EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
 #endif
 		}
 
 		void BeginFrameRendering (ScriptableRenderContext context, Camera[] cameras) {
 			RefreshRenderPipelineMode();
+		}
 
+		void BeginCameraRendering (ScriptableRenderContext context, Camera camera) {
 #if MODULE_RENDER_PIPELINES_UNIVERSAL
 			if (detectedRenderPipeline == DetectedRenderPipeline.URP) {
-				for (int i = 0; i < cameras.Length; i++) {
-					var cam = cameras[i];
-					var data = cam.GetUniversalAdditionalCameraData();
-					if (data != null) {
-						var renderer = data.scriptableRenderer;
-						if (renderPassFeature == null) {
-							renderPassFeature = ScriptableObject.CreateInstance<AlineURPRenderPassFeature>();
-						}
-						renderPassFeature.AddRenderPasses(renderer);
+				var data = camera.GetUniversalAdditionalCameraData();
+				if (data != null) {
+					var renderer = data.scriptableRenderer;
+					if (renderPassFeature == null) {
+						renderPassFeature = ScriptableObject.CreateInstance<AlineURPRenderPassFeature>();
 					}
+					renderPassFeature.AddRenderPasses(renderer);
 				}
 			}
 #endif
@@ -291,9 +321,10 @@ namespace Drawing {
 			actuallyEnabled = false;
 			Camera.onPostRender -= PostRender;
 			UnityEngine.Rendering.RenderPipelineManager.beginFrameRendering -= BeginFrameRendering;
+			UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering -= BeginCameraRendering;
 			UnityEngine.Rendering.RenderPipelineManager.endCameraRendering -= EndCameraRendering;
 #if UNITY_EDITOR
-			EditorApplication.update -= OnUpdate;
+			EditorApplication.update -= OnEditorUpdate;
 			EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
 #endif
 			// Gizmos can be null here if this GameObject was duplicated by a user in the hierarchy.
@@ -331,27 +362,49 @@ namespace Drawing {
 		// Draw.ingame_builder = gizmos.GetBuiltInBuilder(true);
 		// }
 
-		void OnUpdate () {
+		const float NO_DRAWING_TIMEOUT_SECS = 10;
+
+		void OnEditorUpdate () {
 			framePassed = true;
+			CleanupIfNoCameraRendered();
+		}
+
+		void Update () {
+			if (actuallyEnabled) CleanupIfNoCameraRendered();
+		}
+
+		void CleanupIfNoCameraRendered () {
 			if (Time.frameCount > lastFrameCount + 1) {
 				// More than one frame old
 				// It is possible no camera is being rendered at all.
 				// Ensure we don't get any memory leaks from drawing items being queued every frame.
 				CheckFrameTicking();
+				gizmos.PostRenderCleanup();
 
 				// Note: We do not always want to call the above method here
 				// because it is nicer to call it right after the cameras have been rendered.
-				// Otherwise drawing items queued before OnUpdate or after OnUpdate may end up
+				// Otherwise drawing items queued before Update/OnEditorUpdate or after Update/OnEditorUpdate may end up
 				// in different frames (for the purposes of rendering gizmos)
+			}
+
+			if (Time.realtimeSinceStartup - lastFrameTime > NO_DRAWING_TIMEOUT_SECS) {
+				// More than NO_DRAWING_TIMEOUT_SECS seconds since we drew the last frame.
+				// In the editor some script could be queuing drawing commands in e.g. EditorWindow.Update without the scene
+				// view or any game view being re-rendered. We discard these commands if nothing has been rendered for a long time.
+				Draw.builder.DiscardAndDisposeInternal();
+				Draw.ingame_builder.DiscardAndDisposeInternal();
+				Draw.builder = gizmos.GetBuiltInBuilder(false);
+				Draw.ingame_builder = gizmos.GetBuiltInBuilder(true);
+				lastFrameTime = Time.realtimeSinceStartup;
 			}
 		}
 
 		internal void ExecuteCustomRenderPass (ScriptableRenderContext context, Camera camera) {
-			UnityEngine.Profiling.Profiler.BeginSample("ALINE");
+			MarkerALINE.Begin();
 			commandBuffer.Clear();
 			SubmitFrame(camera, commandBuffer, true);
 			context.ExecuteCommandBuffer(commandBuffer);
-			UnityEngine.Profiling.Profiler.EndSample();
+			MarkerALINE.End();
 		}
 
 		private void EndCameraRendering (ScriptableRenderContext context, Camera camera) {
@@ -370,15 +423,17 @@ namespace Drawing {
 			// This method is only called when using Unity's built-in render pipeline
 			commandBuffer.Clear();
 			SubmitFrame(camera, commandBuffer, false);
-			UnityEngine.Profiling.Profiler.BeginSample("Executing command buffer");
+			MarkerCommandBuffer.Begin();
 			Graphics.ExecuteCommandBuffer(commandBuffer);
-			UnityEngine.Profiling.Profiler.EndSample();
+			MarkerCommandBuffer.End();
 		}
 
 		void CheckFrameTicking () {
+			MarkerFrameTick.Begin();
 			if (Time.frameCount != lastFrameCount) {
 				framePassed = true;
 				lastFrameCount = Time.frameCount;
+				lastFrameTime = Time.realtimeSinceStartup;
 				previousFrameRedrawScope = gizmos.frameRedrawScope;
 				gizmos.frameRedrawScope = new RedrawScope(gizmos);
 				Draw.builder.DisposeInternal();
@@ -394,12 +449,13 @@ namespace Drawing {
 			}
 
 			if (framePassed) {
-				gizmos.TickFrame();
+				gizmos.TickFramePreRender();
 #if UNITY_EDITOR
 				builtGizmos = false;
 #endif
 				framePassed = false;
 			}
+			MarkerFrameTick.End();
 		}
 
 		internal void SubmitFrame (Camera camera, CommandBuffer cmd, bool usingRenderPipeline) {
@@ -414,26 +470,16 @@ namespace Drawing {
 			CheckFrameTicking();
 
 			Submit(camera, cmd, usingRenderPipeline, allowCameraDefault);
+
+			gizmos.PostRenderCleanup();
 		}
 
 #if UNITY_EDITOR
-		static System.Reflection.MethodInfo IsGizmosAllowedForObject = typeof(UnityEditor.EditorGUIUtility).GetMethod("IsGizmosAllowedForObject", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-		static System.Type AnnotationUtility = typeof(UnityEditor.PlayModeStateChange).Assembly?.GetType("UnityEditor.AnnotationUtility");
-		System.Object[] cachedObjectParameterArray = new System.Object[1];
+		static readonly System.Reflection.MethodInfo IsGizmosAllowedForObject = typeof(UnityEditor.EditorGUIUtility).GetMethod("IsGizmosAllowedForObject", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+		readonly System.Object[] cachedObjectParameterArray = new System.Object[1];
 #endif
 
-		bool use3dGizmos {
-			get {
-#if UNITY_EDITOR
-				var use3dGizmosProperty = AnnotationUtility.GetProperty("use3dGizmos", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-				return (bool)use3dGizmosProperty.GetValue(null);
-#else
-				return true;
-#endif
-			}
-		}
-
-		Dictionary<System.Type, bool> typeToGizmosEnabled = new Dictionary<Type, bool>();
+		readonly Dictionary<System.Type, bool> typeToGizmosEnabled = new Dictionary<Type, bool>();
 
 		bool ShouldDrawGizmos (UnityEngine.Object obj) {
 #if UNITY_EDITOR
@@ -447,57 +493,60 @@ namespace Drawing {
 #endif
 		}
 
-		void RemoveDestroyedGizmoDrawers () {
-			UnityEngine.Profiling.Profiler.BeginSample("Filter destroyed objects");
+		static void RemoveDestroyedGizmoDrawers () {
+			MarkerFilterDestroyedObjects.Begin();
 			int j = 0;
 			for (int i = 0; i < gizmoDrawers.Count; i++) {
-				var mono = gizmoDrawers[i] as MonoBehaviour;
-				if (mono) {
-					gizmoDrawers[j] = gizmoDrawers[i];
+				var v = gizmoDrawers[i];
+				if (v as MonoBehaviour) {
+					gizmoDrawers[j] = v;
 					j++;
 				}
 			}
 			gizmoDrawers.RemoveRange(j, gizmoDrawers.Count - j);
-			UnityEngine.Profiling.Profiler.EndSample();
+			MarkerFilterDestroyedObjects.End();
 		}
 
 #if UNITY_EDITOR
 		void DrawGizmos (bool usingRenderPipeline) {
-			UnityEngine.Profiling.Profiler.BeginSample("Refresh Selection Cache");
-			GizmoContext.Refresh();
-			UnityEngine.Profiling.Profiler.EndSample();
-			UnityEngine.Profiling.Profiler.BeginSample("GizmosAllowed");
+			GizmoContext.SetDirty();
+			MarkerGizmosAllowed.Begin();
 			typeToGizmosEnabled.Clear();
-#if !UNITY_2022_1_OR_NEWER
-			if (!usingRenderPipeline) {
-#endif
+
 			// Fill the typeToGizmosEnabled dict with info about which classes should be drawn
+#if UNITY_2022_1_OR_NEWER
+			// In Unity 2022.1 we can use a new utility class which is more robust.
+			foreach (var tp in gizmoDrawerTypes) {
+				if (GizmoUtility.TryGetGizmoInfo(tp, out var gizmoInfo)) {
+					typeToGizmosEnabled[tp] = gizmoInfo.gizmoEnabled;
+				} else {
+					typeToGizmosEnabled[tp] = true;
+				}
+			}
+#else
 			// We take advantage of the fact that IsGizmosAllowedForObject only depends on the type of the object and if it is active and enabled
 			// and not the specific object instance.
 			// When using a render pipeline the ShouldDrawGizmos method cannot be used because it seems to occasionally crash Unity :(
 			// So we need these two separate cases.
-			// In Unity 2022.1 we can use a new utility class which is more robust.
-			for (int i = gizmoDrawers.Count - 1; i >= 0; i--) {
-				var tp = gizmoDrawers[i].GetType();
-				if (!typeToGizmosEnabled.ContainsKey(tp)) {
-#if UNITY_2022_1_OR_NEWER
-					if (GizmoUtility.TryGetGizmoInfo(tp, out var gizmoInfo)) {
-						typeToGizmosEnabled[tp] = gizmoInfo.gizmoEnabled;
-					} else {
-						typeToGizmosEnabled[tp] = true;
-					}
-#else
-					if ((gizmoDrawers[i] as MonoBehaviour).isActiveAndEnabled) {
+			if (!usingRenderPipeline) {
+				for (int i = gizmoDrawers.Count - 1; i >= 0; i--) {
+					var tp = gizmoDrawers[i].GetType();
+					if (!typeToGizmosEnabled.ContainsKey(tp) && (gizmoDrawers[i] as MonoBehaviour).isActiveAndEnabled) {
 						typeToGizmosEnabled[tp] = ShouldDrawGizmos((UnityEngine.Object)gizmoDrawers[i]);
 					}
-#endif
+				}
+				foreach (var tp in gizmoDrawerTypes) {
+					// Check if there were no enabled objects of that type at all
+					if (!typeToGizmosEnabled.ContainsKey(tp)) typeToGizmosEnabled[tp] = false;
+				}
+			} else {
+				foreach (var tp in gizmoDrawerTypes) {
+					typeToGizmosEnabled[tp] = true;
 				}
 			}
-#if !UNITY_2022_1_OR_NEWER
-		}
 #endif
 
-			UnityEngine.Profiling.Profiler.EndSample();
+			MarkerGizmosAllowed.End();
 
 			// Set the current frame's redraw scope to an empty scope.
 			// This is because gizmos are rendered every frame anyway so we never want to redraw them.
@@ -514,13 +563,12 @@ namespace Drawing {
 			// cannot be disposed normally to prevent user error.
 			// The try-finally is equivalent to a 'using' block.
 			var gizmoBuilder = gizmos.GetBuiltInBuilder();
+			// Replace Draw.builder with a custom one just for gizmos
+			var debugBuilder = Draw.builder;
+			MarkerDrawGizmos.Begin();
+			GizmoContext.drawingGizmos = true;
 			try {
-				// Replace Draw.builder with a custom one just for gizmos
-				var debugBuilder = Draw.builder;
 				Draw.builder = gizmoBuilder;
-
-				UnityEngine.Profiling.Profiler.BeginSample("DrawGizmos");
-				GizmoContext.drawingGizmos = true;
 				if (usingRenderPipeline) {
 					for (int i = gizmoDrawers.Count - 1; i >= 0; i--) {
 						var mono = gizmoDrawers[i] as MonoBehaviour;
@@ -546,27 +594,26 @@ namespace Drawing {
 				} else {
 					for (int i = gizmoDrawers.Count - 1; i >= 0; i--) {
 						var mono = gizmoDrawers[i] as MonoBehaviour;
+						if (mono.isActiveAndEnabled && (mono.hideFlags & HideFlags.HideInHierarchy) == 0 && typeToGizmosEnabled[gizmoDrawers[i].GetType()]) {
 #if UNITY_EDITOR && UNITY_2020_1_OR_NEWER
-						// True if the scene is in isolation mode (e.g. focusing on a single prefab) and this object is not part of that sub-stage
-						var disabledDueToIsolationMode = isInNonMainStage && StageUtility.GetStage(mono.gameObject) != currentStage;
+							// True if the scene is in isolation mode (e.g. focusing on a single prefab) and this object is not part of that sub-stage
+							var disabledDueToIsolationMode = isInNonMainStage && StageUtility.GetStage(mono.gameObject) != currentStage;
 #else
-						var disabledDueToIsolationMode = false;
+							var disabledDueToIsolationMode = false;
 #endif
-						if (mono.isActiveAndEnabled && (mono.hideFlags & HideFlags.HideInHierarchy) == 0 && typeToGizmosEnabled[gizmoDrawers[i].GetType()] && !disabledDueToIsolationMode) {
 							try {
-								gizmoDrawers[i].DrawGizmos();
+								if (!disabledDueToIsolationMode) gizmoDrawers[i].DrawGizmos();
 							} catch (System.Exception e) {
 								Debug.LogException(e, mono);
 							}
 						}
 					}
 				}
+			} finally {
 				GizmoContext.drawingGizmos = false;
-				UnityEngine.Profiling.Profiler.EndSample();
-
+				MarkerDrawGizmos.End();
 				// Revert to the original builder
 				Draw.builder = debugBuilder;
-			} finally {
 				gizmoBuilder.DisposeInternal();
 			}
 
@@ -594,13 +641,13 @@ namespace Drawing {
 			bool drawGizmos = false;
 #endif
 
-			UnityEngine.Profiling.Profiler.BeginSample("Submit Gizmos");
+			MarkerSubmitGizmos.Begin();
 			Draw.builder.DisposeInternal();
 			Draw.ingame_builder.DisposeInternal();
 			gizmos.Render(camera, drawGizmos, cmd, allowCameraDefault);
 			Draw.builder = gizmos.GetBuiltInBuilder(false);
 			Draw.ingame_builder = gizmos.GetBuiltInBuilder(true);
-			UnityEngine.Profiling.Profiler.EndSample();
+			MarkerSubmitGizmos.End();
 		}
 
 		/// <summary>
@@ -608,7 +655,10 @@ namespace Drawing {
 		/// The DrawGizmos method on the object will be called every frame until it is destroyed (assuming there are cameras with gizmos enabled).
 		/// </summary>
 		public static void Register (IDrawGizmos item) {
+			// TODO: Use reflection to figure out if this type actually overrides the DrawGizmos method
+			// If it does not then we can skip adding it to the list.
 			gizmoDrawers.Add(item);
+			gizmoDrawerTypes.Add(item.GetType());
 		}
 
 		/// <summary>
@@ -625,9 +675,7 @@ namespace Drawing {
 		/// </summary>
 		/// <param name="renderInGame">If true, this builder will be rendered in standalone games and in the editor even if gizmos are disabled.
 		/// If false, it will only be rendered in the editor when gizmos are enabled.</param>
-		public static CommandBuilder GetBuilder (bool renderInGame = false) {
-			return instance.gizmos.GetBuilder(renderInGame);
-		}
+		public static CommandBuilder GetBuilder(bool renderInGame = false) => instance.gizmos.GetBuilder(renderInGame);
 
 		/// <summary>
 		/// Get an empty builder for queuing drawing commands.
@@ -637,9 +685,7 @@ namespace Drawing {
 		/// <param name="redrawScope">Scope for this command builder. See #GetRedrawScope.</param>
 		/// <param name="renderInGame">If true, this builder will be rendered in standalone games and in the editor even if gizmos are disabled.
 		/// If false, it will only be rendered in the editor when gizmos are enabled.</param>
-		public static CommandBuilder GetBuilder (RedrawScope redrawScope, bool renderInGame = false) {
-			return instance.gizmos.GetBuilder(redrawScope, renderInGame);
-		}
+		public static CommandBuilder GetBuilder(RedrawScope redrawScope, bool renderInGame = false) => instance.gizmos.GetBuilder(redrawScope, renderInGame);
 
 		/// <summary>
 		/// Get an empty builder for queuing drawing commands.
@@ -650,9 +696,7 @@ namespace Drawing {
 		/// <param name="hasher">Hash of whatever inputs you used to generate the drawing data.</param>
 		/// <param name="redrawScope">Scope for this command builder. See #GetRedrawScope.</param>
 		/// <param name="renderInGame">If true, this builder will be rendered in standalone games and in the editor even if gizmos are disabled.</param>
-		public static CommandBuilder GetBuilder (DrawingData.Hasher hasher, RedrawScope redrawScope = default, bool renderInGame = false) {
-			return instance.gizmos.GetBuilder(hasher, redrawScope, renderInGame);
-		}
+		public static CommandBuilder GetBuilder(DrawingData.Hasher hasher, RedrawScope redrawScope = default, bool renderInGame = false) => instance.gizmos.GetBuilder(hasher, redrawScope, renderInGame);
 
 		/// <summary>
 		/// A scope which can be used to draw things over multiple frames.
@@ -669,8 +713,8 @@ namespace Drawing {
 		///     }
 		/// }
 		///
-		/// void Update () {
-		///     redrawScope.Draw();
+		/// void OnDestroy () {
+		///     redrawScope.Dispose();
 		/// }
 		/// </code>
 		///
@@ -679,7 +723,9 @@ namespace Drawing {
 		/// After that point calling <see cref="Drawing.RedrawScope.Draw"/> will not do anything.
 		/// </summary>
 		public static RedrawScope GetRedrawScope () {
-			return new RedrawScope(instance.gizmos);
+			var scope = new RedrawScope(instance.gizmos);
+			scope.DrawUntilDispose();
+			return scope;
 		}
 	}
 }

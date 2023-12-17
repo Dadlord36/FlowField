@@ -12,7 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cc023b1990594eeaa296eff665573483, type: 3}
   m_Name: DefaultEntityParameters
   m_EditorClassIdentifier: 
-  mesh: {fileID: 10206, guid: 0000000000000000e000000000000000, type: 0}
+  mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
   material: {fileID: 2100000, guid: 1d56e896c417d4b458be6b1dfee95676, type: 2}
-  entityCount: 50
-  speed: 2
+  entityCount: 5000
+  speed: 4
+  crowdAvoidanceDistance: 3

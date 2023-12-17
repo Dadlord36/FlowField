@@ -6,6 +6,7 @@ using Structs;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Mathematics;
 using Unity.Transforms;
 using UnityEngine;
 
@@ -29,12 +30,8 @@ namespace DOTS.Jobs
 
         private void Execute(RefRO<CellIndexComponent> cellIndexComponent)
         {
-            if (cellIndexComponent.ValueRO.IsValid == false)
-            {
-                return;
-            }
             LocalToWorld localToWorld =
-                CylinderCalculations.CalculateLocalToWorldMatrixAt(gridParameters, cylinderParameters, cellIndexComponent.ValueRO.index);
+                CylinderCalculations.CalculateLocalToWorldMatrixAt(gridParameters, cylinderParameters, cellIndexComponent.ValueRO.index, float3.zero);
             drawingCommandBuilder.SolidPlane(localToWorld.Position, localToWorld.Rotation, gridParameters.cellSize, Color.red);
         }
     }
