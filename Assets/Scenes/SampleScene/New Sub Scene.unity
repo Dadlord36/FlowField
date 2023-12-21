@@ -150,13 +150,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   parameters: {fileID: 11400000, guid: 365d77b9f468bcb48a112ba494943223, type: 2}
   flowMapFileName: flow_field
-  gridOrigin:
-    x: 0
-    y: 0
-    z: 0
   gridCellSize:
-    x: 100
-    y: 100
+    x: 2
+    y: 2
   gridDimensions:
     x: 50
     y: 50

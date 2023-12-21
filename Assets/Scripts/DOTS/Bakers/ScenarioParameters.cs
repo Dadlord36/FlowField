@@ -17,8 +17,7 @@ namespace DOTS.Bakers
     {
         [SerializeField] private EntityParameters parameters;
 
-        [SerializeField] private string flowMapFileName = "flow_field";
-        [SerializeField] private float3 gridOrigin = Vector3.zero;
+        // [SerializeField] private string flowMapFileName = "flow_field";
         [SerializeField] private float2 gridCellSize = new(100, 100);
         [SerializeField] private uint2 gridDimensions;
         [SerializeField] private CylinderParameters spawnCylinderParameters;
@@ -105,27 +104,25 @@ namespace DOTS.Bakers
                     return;
                 }
 
-                var flowMapComponent = new FlowMapComponent
-                {
-                    flowMap = new NativeArray2D<float2>(FormFlowField((ushort)authoring.gridDimensions.x, (ushort)authoring.gridDimensions.y),
-                        Allocator.Domain)
-                };
+                var flowFieldArray =  new NativeArray2D<float2>(FormFlowField((ushort)authoring.gridDimensions.x, (ushort)authoring.gridDimensions.y),
+                    Allocator.Temp);
+                var flowMapComponent = new FlowMapComponent(flowFieldArray);
+                flowFieldArray.Dispose();
 
                 var gridParameters = new GridParametersComponent
                 {
                     gridParameters = new GridParameters((ushort)authoring.gridDimensions.x, (ushort)authoring.gridDimensions.y,
-                        authoring.gridCellSize, authoring.gridOrigin)
+                        authoring.gridCellSize)
                 };
 
                 var cylinderParameters = new CylinderParametersComponent
                 {
                     cylinderParameters = authoring.spawnCylinderParameters
                 };
+                cylinderParameters.cylinderParameters.cylinderOrigin = authoring.transform.position;
 
                 EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-
-                entityManager.CreateSingleton(flowMapComponent);
-                entityManager.CreateSingleton(gridParameters);
+                
                 entityManager.CreateSingleton(new EntitySpawnParametersComponent
                 {
                     speed = authoring.parameters.speed,
@@ -134,7 +131,9 @@ namespace DOTS.Bakers
                 entityManager.CreateSingleton(
                     new MovementParametersComponent(authoring.parameters.speed, authoring.parameters.crowdAvoidanceDistance));
 
-                Entity parametersEntity = entityManager.CreateEntity(typeof(SpawnEntityParametersTag));
+                Entity parametersEntity = entityManager.CreateEntity(typeof(WalkingSurfaceTag));
+                entityManager.AddSharedComponent(parametersEntity, flowMapComponent);
+                entityManager.AddSharedComponent(parametersEntity, gridParameters);
                 entityManager.AddSharedComponent(parametersEntity, cylinderParameters);
                 entityManager.AddSharedComponentManaged(parametersEntity,
                     new RenderMeshArray(new[] { authoring.parameters.material },

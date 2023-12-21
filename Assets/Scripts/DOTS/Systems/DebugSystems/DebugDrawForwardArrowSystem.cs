@@ -14,6 +14,28 @@ namespace DOTS.Systems.DebugSystems
     public partial struct DebugDrawForwardArrowSystem : ISystem
     {
         [BurstCompile]
+        private partial struct DrawArrowsJob : IJobEntity
+        {
+            private CommandBuilder _forwardArrowsBuilder;
+            private CommandBuilder _velocityArrowsBuilder;
+
+            public DrawArrowsJob(CommandBuilder forwardArrowsBuilder, CommandBuilder velocityArrowsBuilder) : this()
+            {
+                _forwardArrowsBuilder = forwardArrowsBuilder;
+                _velocityArrowsBuilder = velocityArrowsBuilder;
+            }
+
+            private void Execute(RefRO<LocalToWorld> currentTransform, RefRO<VelocityComponent> velocityComponent)
+            {
+                float3 forwardArrowTipPosition = currentTransform.ValueRO.Position + currentTransform.ValueRO.Forward;
+                _forwardArrowsBuilder.Arrow(currentTransform.ValueRO.Position, forwardArrowTipPosition, Color.blue);
+
+                float3 velocityArrowTipPosition = currentTransform.ValueRO.Position + velocityComponent.ValueRO.velocity;
+                _velocityArrowsBuilder.Arrow(currentTransform.ValueRO.Position, velocityArrowTipPosition, Color.red);
+            }
+        }
+
+        [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<VelocityDrivenTag>();
@@ -26,19 +48,10 @@ namespace DOTS.Systems.DebugSystems
             CommandBuilder forwardArrowsBuilder = DrawingManager.GetBuilder(true);
             CommandBuilder velocityArrowsBuilder = DrawingManager.GetBuilder(true);
 
-            foreach (var (localTransform, velocityComponent) in SystemAPI.Query<RefRO<LocalToWorld>, RefRO<VelocityComponent>>())
-            {
-                ref readonly LocalToWorld currentTransform = ref localTransform.ValueRO;
+            state.Dependency = new DrawArrowsJob(forwardArrowsBuilder, velocityArrowsBuilder).ScheduleParallel(state.Dependency);
 
-                float3 forwardArrowTipPosition = currentTransform.Position + currentTransform.Forward;
-                forwardArrowsBuilder.Arrow(currentTransform.Position, forwardArrowTipPosition, Color.blue);
-
-                float3 velocityArrowTipPosition = currentTransform.Position + velocityComponent.ValueRO.velocity;
-                velocityArrowsBuilder.Arrow(currentTransform.Position, velocityArrowTipPosition, Color.red);
-            }
-
-            forwardArrowsBuilder.Dispose();
-            velocityArrowsBuilder.Dispose();
+            forwardArrowsBuilder.DisposeAfter(state.Dependency);
+            velocityArrowsBuilder.DisposeAfter(state.Dependency);
         }
 
         [BurstCompile]

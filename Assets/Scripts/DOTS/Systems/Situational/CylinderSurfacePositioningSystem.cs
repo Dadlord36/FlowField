@@ -1,11 +1,12 @@
 ﻿using System.Runtime.InteropServices;
 using DOTS.Components;
+using DOTS.Components.Tags;
 using FunctionalLibraries;
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Transforms;
 
-namespace DOTS.Systems
+namespace DOTS.Systems.Situational
 {
     [UpdateInGroup(typeof(InitializationSystemGroup))]
     [StructLayout(LayoutKind.Auto)]
@@ -16,13 +17,15 @@ namespace DOTS.Systems
 
         [BurstCompile]
         [StructLayout(LayoutKind.Auto)]
+        [WithAll(typeof(SurfaceWalkerTag))]
         private partial struct CylinderSurfacePositionCalculationJob : IJobEntity
         {
             private void Execute(in CylinderParametersComponent cylinderParametersComponent, RefRO<LocalToWorld> transform,
                 RefRW<CylinderSurfacePositioningComponent> cylinderSurfacePositioningComponent)
             {
+                /*ref OrbitCoordinate orbitCoordinate = ref cylinderSurfacePositioningComponent.ValueRW.orbitCoordinate;
                 CylinderCalculations.GetHeightAndAngleOnCylinderAt(cylinderParametersComponent.cylinderParameters, transform.ValueRO.Position,
-                    out cylinderSurfacePositioningComponent.ValueRW.height, out cylinderSurfacePositioningComponent.ValueRW.angle);
+                    ref orbitCoordinate);*/
             }
         }
 

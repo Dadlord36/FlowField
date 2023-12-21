@@ -1,11 +1,9 @@
 ﻿using DOTS.Components;
+using DOTS.Components.Tags;
 using Drawing;
 using FunctionalLibraries;
-using Structs;
 using Unity.Burst;
-using Unity.Collections;
 using Unity.Entities;
-using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Rendering;
 using UnityEngine;
@@ -13,36 +11,45 @@ using UnityEngine;
 namespace DOTS.Systems.DebugSystems
 {
     [UpdateInGroup(typeof(UpdatePresentationSystemGroup))]
-    [DisableAutoCreation]
+    // [DisableAutoCreation
     public partial struct DebugDrawGridSystem : ISystem
     {
         [BurstCompile]
-        private struct DrawGridJob : IJob
+        [WithAll(typeof(WalkingSurfaceTag))]
+        private partial struct DrawGridJob : IJobEntity
         {
-            public float3 gridCenter;
-            public int cellsNumber;
-            public float2 gridTotalSize;
+            private CommandBuilder _drawingCommandBuilder;
 
-            public CommandBuilder drawingCommandBuilder;
-
-            public void Execute()
+            public DrawGridJob(CommandBuilder drawingCommandBuilder) : this()
             {
-                drawingCommandBuilder.WireGrid(gridCenter, quaternion.identity, cellsNumber, gridTotalSize);
+                this._drawingCommandBuilder = drawingCommandBuilder;
             }
-        }
 
-        [BurstCompile]
-        private struct DrawFlowVectorsJob : IJobParallelFor
-        {
-            [ReadOnly] public CommandBuilder drawingCommandBuilder;
-            [ReadOnly] public NativeArray2D<float2> flowMap;
-            [ReadOnly] public GridParameters gridParameters;
-
-            void IJobParallelFor.Execute(int index)
+            public void Execute(in CylinderParametersComponent cylinderParametersComponent, in GridParametersComponent gridParametersComponent)
             {
-                float3 cellCenter = GridCalculations.GetCellCenterAt(gridParameters, (uint)index);
-                var flowVector = new float3(flowMap[index].x, 0, flowMap[index].y);
-                drawingCommandBuilder.Arrow(cellCenter, cellCenter + flowVector, Color.red);
+                //Grid will be projected onto a cylinder and os will be represented by circles for rows and lines for columns.
+                float2 cellSize = gridParametersComponent.gridParameters.cellSize;
+                float3 cylinderCenter = cylinderParametersComponent.cylinderParameters.cylinderOrigin;
+                float cylinderRadius = cylinderParametersComponent.cylinderParameters.radius;
+                uint columnsNumber = gridParametersComponent.gridParameters.columnNumber; 
+
+                // Draw rows as circles
+                for (ushort i = 0; i <= gridParametersComponent.gridParameters.rowNumber; i++)
+                {
+                    float2 rowCenter = cylinderCenter.xy + new float2(0, i * (cellSize.y / 2));
+                    _drawingCommandBuilder.xz.Circle(new float3(rowCenter, cylinderCenter.z), cylinderRadius,
+                        Color.white);
+                }
+
+                // Draw columns as lines along the cylinder surface (basically they should be placed along the circle. The line should go in up direction
+                for (ushort i = 0; i <= columnsNumber; i++)
+                {
+                    float angle = i * CylinderCalculations.TwoPi / columnsNumber;
+                    float3 startPoint = new float3(math.sin(angle), 0, math.cos(angle)) * cylinderRadius;
+                    float3 endPoint = startPoint + new float3(0, cylinderRadius, 0);
+
+                    _drawingCommandBuilder.Line(startPoint, endPoint, Color.white);
+                }
             }
         }
 
@@ -55,26 +62,11 @@ namespace DOTS.Systems.DebugSystems
         public void OnUpdate(ref SystemState state)
         {
             CommandBuilder drawingBuilder = DrawingManager.GetBuilder(true);
-            var flowMapComponent = SystemAPI.GetSingleton<FlowMapComponent>();
-            var gridParametersComponent = SystemAPI.GetSingleton<GridParametersComponent>();
-            ref GridParameters gridParameters = ref gridParametersComponent.gridParameters;
 
-            JobHandle drawGridJob = new DrawGridJob
-            {
-                gridCenter = gridParameters.gridCenter,
-                cellsNumber = gridParameters.rowNumber,
-                gridTotalSize = gridParameters.gridSize,
-                drawingCommandBuilder = drawingBuilder
-            }.Schedule();
+            state.Dependency = new DrawGridJob(drawingBuilder).Schedule(state.Dependency);
 
-            JobHandle drawFlowVectorsJob = new DrawFlowVectorsJob
-            {
-                drawingCommandBuilder = drawingBuilder,
-                gridParameters = gridParameters,
-                flowMap = flowMapComponent.flowMap
-            }.Schedule(gridParameters.totalCellsNumber, gridParameters.totalCellsNumber / 10, drawGridJob);
-            drawingBuilder.DisposeAfter(drawFlowVectorsJob);
-          
+            drawingBuilder.DisposeAfter(state.Dependency);
+
             state.CompleteDependency();
         }
 

@@ -1,6 +1,7 @@
 ﻿using DOTS.Systems;
 using Unity.Entities;
 using UnityEngine;
+using MainSpawnSystem = DOTS.Systems.Situational.MainSpawnSystem;
 
 namespace Monobeh
 {

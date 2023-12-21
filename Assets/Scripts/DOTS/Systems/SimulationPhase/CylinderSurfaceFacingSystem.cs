@@ -1,35 +1,27 @@
-﻿using System.Runtime.InteropServices;
-using DOTS.Components;
+﻿using DOTS.Components;
 using FunctionalLibraries;
-using Structs;
 using Unity.Burst;
 using Unity.Entities;
-using Unity.Mathematics;
 using Unity.Transforms;
 
-namespace DOTS.Systems
+namespace DOTS.Systems.SimulationPhase
 {
     [UpdateInGroup(typeof(SimulationSystemGroup))]
     [UpdateBefore(typeof(VelocityDrivenMovementSystem))]
+    [DisableAutoCreation]
     public partial struct CylinderSurfaceFacingSystem : ISystem
     {
         [BurstCompile]
-        [StructLayout(LayoutKind.Auto)]
         private partial struct FaceCylinderSurfaceJob : IJobEntity
         {
             private void Execute(RefRO<CylinderSurfacePositioningComponent> cylinderSurfacePositioningComponent, RefRW<LocalToWorld> localToWorld,
                 RefRO<VelocityComponent> velocityComponent, in CylinderParametersComponent cylinderParametersComponent)
             {
-                ref readonly CylinderSurfacePositioningComponent cylinderSurfacePositioning = ref cylinderSurfacePositioningComponent.ValueRO;
-                localToWorld.ValueRW = ComputeTransformOnCylinderSurface(cylinderParametersComponent.cylinderParameters,cylinderSurfacePositioning.height, cylinderSurfacePositioning.angle,
-                    velocityComponent.ValueRO.velocity);
-            }
-
-            private static LocalToWorld ComputeTransformOnCylinderSurface(CylinderParameters cylinderParameters, float height, float angle,
-                in float3 finalForwardVector)
-            {
-                return CylinderCalculations.CalculateLocalToWorldOnCylinderSurfacePerpendicularToIt(cylinderParameters, height, angle,
-                    finalForwardVector);
+                /*ref readonly CylinderSurfacePositioningComponent cylinderSurfacePositioning = ref cylinderSurfacePositioningComponent.ValueRO;
+                localToWorld.ValueRW = CylinderCalculations.CalculateLocalToWorldOnCylinderSurfacePerpendicularToIt(
+                    cylinderParametersComponent.cylinderParameters, cylinderSurfacePositioning.orbitCoordinate.height,
+                    cylinderSurfacePositioning.orbitCoordinate.angle,
+                    velocityComponent.ValueRO.velocity);*/
             }
         }
 

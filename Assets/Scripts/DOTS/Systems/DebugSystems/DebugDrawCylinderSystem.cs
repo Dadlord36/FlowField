@@ -1,4 +1,5 @@
 ﻿using DOTS.Components;
+using DOTS.Components.Tags;
 using DOTS.Jobs;
 using Drawing;
 using Structs;
@@ -17,21 +18,21 @@ namespace DOTS.Systems.DebugSystems
         private static readonly float3 Up = Vector3.up;
 
         [BurstCompile]
-        private struct DrawCylinderJob : IJob
+        [WithAll(typeof(WalkingSurfaceTag))]
+        private partial struct DrawCylinderJob : IJobEntity
         {
-            private readonly CylinderParameters _cylinderParameters;
             private CommandBuilder _drawingBuilder;
 
-            public DrawCylinderJob(in CylinderParameters cylinderParameters, in CommandBuilder drawingBuilder)
+            public DrawCylinderJob(in CommandBuilder drawingBuilder) : this()
             {
-                _cylinderParameters = cylinderParameters;
                 _drawingBuilder = drawingBuilder;
             }
 
-            public void Execute()
+            private void Execute(in CylinderParametersComponent cylinderParametersComponent)
             {
-                _drawingBuilder.WireCylinder(_cylinderParameters.cylinderOrigin, Up, _cylinderParameters.radius,
-                    _cylinderParameters.height, Color.magenta);
+                ref readonly CylinderParameters cylinderParameters = ref cylinderParametersComponent.cylinderParameters;
+                _drawingBuilder.WireCylinder(cylinderParameters.cylinderOrigin, Up, cylinderParameters.radius,
+                    cylinderParameters.height, Color.magenta);
             }
         }
 
@@ -39,25 +40,23 @@ namespace DOTS.Systems.DebugSystems
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<CylinderParametersComponent>();
-            state.RequireForUpdate<GridParametersComponent>();
+            // state.RequireForUpdate<GridParametersComponent>();
         }
 
         public void OnUpdate(ref SystemState state)
         {
-            /*CommandBuilder drawingBuilder = DrawingManager.GetBuilder(true);
-            var cylinderParametersComponent = SystemAPI.GetSingleton<CylinderParametersComponent>();
-            var gridParametersComponent = SystemAPI.GetSingleton<GridParametersComponent>();
-            ref GridParameters gridParameters = ref gridParametersComponent.gridParameters;
+            CommandBuilder drawingBuilder = DrawingManager.GetBuilder(true);
+            /*var gridParametersComponent = SystemAPI.GetSingleton<GridParametersComponent>();
+            ref GridParameters gridParameters = ref gridParametersComponent.gridParameters;*/
 
-            JobHandle drawCylinderJobHandle =
-                new DrawCylinderJob(cylinderParametersComponent.cylinderParameters, drawingBuilder).Schedule(state.Dependency);
+            state.Dependency = new DrawCylinderJob(drawingBuilder).Schedule( state.Dependency);
             /*JobHandle drawCellsOnCylinderJobHandle =
                 new DrawOccupiedCellOnCylinderJob(drawingBuilder, gridParameters, cylinderParametersComponent.cylinderParameters).ScheduleParallel(
-                    drawCylinderJobHandle);#1#
+                    drawCylinderJobHandle);*/
 
-            drawingBuilder.DisposeAfter(drawCylinderJobHandle);
+            drawingBuilder.DisposeAfter(state.Dependency);
 
-            state.CompleteDependency();*/
+            // state.CompleteDependency();
         }
 
         [BurstCompile]

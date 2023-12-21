@@ -6,7 +6,8 @@ namespace DOTS.Components.Tags
 {
     [StructLayout(LayoutKind.Sequential, Size = 1)]
     [BurstCompile]
-    public struct SpawnEntityParametersTag : IComponentData
+    public struct SurfaceWalkerTag : IComponentData
     {
+        
     }
 }

@@ -13,20 +13,24 @@ namespace Structs
 
         public readonly ushort columnNumber;
         public readonly ushort rowNumber;
+        public readonly ushort maxColumnIndex;
+        public readonly ushort maxRowIndex;
+
         public readonly float2 gridSize;
         public readonly float2 cellSize;
-        public readonly float3 gridCenter;
 
         public readonly ushort totalCellsNumber;
 
-        public GridParameters(ushort columnNumber, ushort rowNumber, float2 cellSize, float3 gridCenter) : this()
+        public GridParameters(ushort columnNumber, ushort rowNumber, float2 cellSize) : this()
         {
-            this.columnNumber = columnNumber;
-            this.rowNumber = rowNumber;
+            this.columnNumber = maxColumnIndex = columnNumber;
+            this.rowNumber = maxRowIndex = rowNumber;
             this.cellSize = cellSize;
-            this.gridCenter = gridCenter;
+            
+            --maxColumnIndex;
+            --maxRowIndex;
 
-            gridSize = CalculateGridSize(columnNumber, rowNumber, gridSize);
+            gridSize = CalculateGridSize(columnNumber, rowNumber, cellSize);
             totalCellsNumber = (ushort)(columnNumber * rowNumber);
         }
 

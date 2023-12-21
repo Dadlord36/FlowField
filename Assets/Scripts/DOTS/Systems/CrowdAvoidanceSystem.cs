@@ -2,6 +2,7 @@
 using DOTS.Components;
 using DOTS.Components.Tags;
 using DOTS.Jobs;
+using DOTS.Systems.SimulationPhase;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;

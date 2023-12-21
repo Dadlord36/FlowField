@@ -4,10 +4,11 @@ using FunctionalLibraries;
 using Unity.Burst;
 using Unity.Entities;
 
-namespace DOTS.Systems
+namespace DOTS.Systems.InitializationPhase
 {
     [UpdateInGroup(typeof(SimulationSystemGroup))]
-    [UpdateAfter(typeof(CylinderSurfaceFacingSystem))]
+    [UpdateAfter(typeof(SimulationPhase.VelocityDrivenMovementSystem))]
+    [DisableAutoCreation]
     public partial struct CylinderVelocityConvertingSystem : ISystem
     {
         [BurstCompile]
@@ -17,9 +18,8 @@ namespace DOTS.Systems
             private void Execute(RefRO<CylinderSurfacePositioningComponent> cylinderSurfacePositioningComponent,
                 RefRO<FlowFieldVelocityComponent> flowFieldVelocityComponent, RefRW<VelocityComponent> velocityComponent)
             {
-                velocityComponent.ValueRW.velocity = CylinderCalculations.ConvertToCylinderVelocity(
-                    flowFieldVelocityComponent.ValueRO.flowVelocity,
-                    cylinderSurfacePositioningComponent.ValueRO.angle);
+                /*velocityComponent.ValueRW.velocity = CylinderCalculations.ConvertToCylinderVelocity(
+                    flowFieldVelocityComponent.ValueRO.flowVelocity, cylinderSurfacePositioningComponent.ValueRO.orbitCoordinate.angle);*/
             }
         }
 
@@ -29,16 +29,18 @@ namespace DOTS.Systems
             state.RequireForUpdate<CylinderSurfacePositioningComponent>();
             state.RequireForUpdate<FlowFieldVelocityComponent>();
             state.RequireForUpdate<VelocityComponent>();
-
+            _cylinderVelocityConvertingJob = new CylinderVelocityConvertingJob();
             // _random = new Random(214234);
         }
 
         // private Random _random;
 
+        private CylinderVelocityConvertingJob _cylinderVelocityConvertingJob;
+
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            state.Dependency = new CylinderVelocityConvertingJob().ScheduleParallel(state.Dependency);
+            state.Dependency = _cylinderVelocityConvertingJob.ScheduleParallel(state.Dependency);
             state.CompleteDependency();
         }
 

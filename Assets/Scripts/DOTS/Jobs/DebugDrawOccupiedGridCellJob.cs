@@ -26,8 +26,8 @@ namespace DOTS.Jobs
 
         private void Execute(RefRO<CellIndexComponent> cellIndexComponent)
         {
-            float3 cellCenter = GridCalculations.GetCellCenterAt(gridParameters, cellIndexComponent.ValueRO.index);
-            drawingCommandBuilder.SolidPlane(cellCenter, quaternion.identity, gridParameters.cellSize, Color.red);
+            /*float3 cellCenter = GridCalculations.GetCellCenterAt(gridParameters, cellIndexComponent.ValueRO.index);
+            drawingCommandBuilder.SolidPlane(cellCenter, quaternion.identity, gridParameters.cellSize, Color.red);*/
         }
     }
 }

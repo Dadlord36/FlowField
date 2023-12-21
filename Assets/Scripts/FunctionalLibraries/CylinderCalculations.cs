@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using DOTS.Components;
 using Structs;
 using Unity.Mathematics;
 using Unity.Transforms;
@@ -8,7 +9,11 @@ namespace FunctionalLibraries
 {
     public static class CylinderCalculations
     {
-        private const float _twoPI = 2 * math.PI;
+        public const float TwoPi = 2 * math.PI;
+        public const float HalfPi = math.PI / 2f;
+        public const float NegativeHalfPi = -HalfPi;
+
+        private static readonly float3 SingularScale = new(1f, 1f, 1f);
 
         /// <summary>
         /// Calculates a point on the surface of a cylinder at a given angle and height.
@@ -50,7 +55,7 @@ namespace FunctionalLibraries
         public static float3 GetGridCenterProjectedOnCylinderSurfaceAt(in GridParameters gridParameters, in CylinderParameters cylinderParameters,
             in uint2 cellIndex)
         {
-            float angle = CalculateRadiansAngleOnCylinderAtGridIndex(gridParameters, cylinderParameters, cellIndex);
+            float angle = CalculateRadiansAngleOnCylinderAtGridIndex(gridParameters, cellIndex);
             float height = CalculateHeightOnCylinderAtGridIndex(gridParameters, cellIndex);
             return GetPointOnCylinderSurfaceAt(cylinderParameters, angle, height);
         }
@@ -73,7 +78,7 @@ namespace FunctionalLibraries
             float surfacePositioningHeight, float surfacePositioningAngleInRadians)
         {
             // Normalize the angle to be within [0, 2 * PI]
-            surfacePositioningAngleInRadians = (surfacePositioningAngleInRadians + _twoPI) % _twoPI;
+            surfacePositioningAngleInRadians = (surfacePositioningAngleInRadians + TwoPi) % TwoPi;
 
             return math.uint2(
                 (uint)math.round(surfacePositioningAngleInRadians * cylinderParameters.radius / gridParameters.cellSize.x),
@@ -128,13 +133,8 @@ namespace FunctionalLibraries
             return finalVelocity;
         }*/
 
-        /// <summary>
-        ///  Converts a velocity in 2D space to a velocity on the surface of a cylinder at a given angle. 
-        /// </summary>
-        /// <param name="flatVelocity"> Velocity in 2D space. </param>
-        /// <param name="angleOnCylinder"> Angle on the cylinder. </param>
-        /// <returns></returns>
-        public static float3 ConvertToCylinderVelocity(float2 flatVelocity, float angleOnCylinder)
+
+        /*public static float3 ConvertToCylinderVelocity(float2 flatVelocity, float angleOnCylinder)
         {
             // Calculate the tangent vector based on some angle (this could be dynamically determined)
             var tangentVector = new float3(-math.sin(angleOnCylinder), 0, math.cos(angleOnCylinder));
@@ -144,6 +144,26 @@ namespace FunctionalLibraries
             float3 tangentialVelocity = tangentVector * flatVelocity.x; // Rotational movement
 
             return axialComponent + tangentialVelocity;
+        }*/
+
+        public static float3 ConvertToCylinderVelocity(float2 flatVelocity, float angleInRadians)
+        {
+            // Calculate the tangent vector based on the angle
+            var tangentVector = new float3(-math.sin(angleInRadians), math.cos(angleInRadians), 0.0f);
+
+            // Axial movement is along the Z-axis
+            var axialComponent = new float3(0.0f, 0.0f, flatVelocity.y);
+
+            // Tangential movement (rotational)
+            float3 tangentialVelocity = tangentVector * flatVelocity.x;
+
+            // Combine the axial and tangential components to get the final velocity
+            float3 finalVelocity = axialComponent + tangentialVelocity;
+
+            // Scale by the original speed to maintain the speed from the 2D velocity
+            finalVelocity *= math.length(flatVelocity);
+
+            return finalVelocity;
         }
 
         public static LocalToWorld CalculateLocalToWorldOnCylinderSurfacePerpendicularToIt(in CylinderParameters cylinderParameters, float height,
@@ -158,18 +178,149 @@ namespace FunctionalLibraries
             };
         }
 
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float CalculateRadiansAngleOnCylinderAtPosition(in CylinderParameters cylinderParameters, float3 position)
         {
-            float angle = math.atan2(position.z - cylinderParameters.center.z, position.x - cylinderParameters.center.x);
-            return angle;
+            return math.atan2(position.z - cylinderParameters.center.z, position.x - cylinderParameters.center.x);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void GetHeightAndAngleOnCylinderAt(in CylinderParameters cylinderParameters, float3 position, out float height,
-            out float angle)
+        public static void GetHeightAndAngleOnCylinderAt(in CylinderParameters cylinderParameters, float3 position,
+            ref OrbitCoordinate orbitCoordinate)
         {
-            height = CalculateHeightOnCylinderAtPosition(cylinderParameters, position);
-            angle = CalculateRadiansAngleOnCylinderAtPosition(cylinderParameters, position);
+            orbitCoordinate.height = CalculateHeightOnCylinderAtPosition(cylinderParameters, position);
+            orbitCoordinate.angle = CalculateRadiansAngleOnCylinderAtPosition(cylinderParameters, position);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static OrbitCoordinate ComputeNextOrbitCoordinate(OrbitCoordinate currentCoordinate, float2 velocity, float speed, float deltaTime)
+        {
+            // Convert the velocity vector to an angle and direction along the cylinder surface
+            float angle = math.atan2(velocity.y, velocity.x);
+            // Calculate the distance traveled based on the given speed
+            float distanceTraveled = speed * deltaTime; // assuming a time interval of 0.1 seconds for the distance calculation
+            // Update the height and angle of the OrbitCoordinate based on the calculated velocity and distance
+            currentCoordinate.height += distanceTraveled * math.sin(angle);
+            currentCoordinate.angle += distanceTraveled * math.cos(angle);
+
+            return currentCoordinate;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float4x4 OrbitToTransform(OrbitCoordinate orbitCoordinate, float radius)
+        {
+            float x = radius * math.cos(orbitCoordinate.angle);
+            float y = orbitCoordinate.height;
+            float z = radius * math.sin(orbitCoordinate.angle);
+            var position = new float3(x, y, z);
+
+            quaternion rotation = quaternion.Euler(0, orbitCoordinate.angle, 0); // Assuming the rotation is around the y-axis
+
+            return float4x4.TRS(
+                position,
+                rotation,
+                SingularScale // Assuming uniform scale of 1
+            );
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static uint2 CalculateCellIndexFromOrbitCoordinate(in GridParameters gridParameters, in CylinderParameters cylinderParameters,
+            OrbitCoordinate orbitCoordinate)
+        {
+            float normalizedAngle = math.fmod(orbitCoordinate.angle, TwoPi);
+            normalizedAngle = math.select(normalizedAngle, normalizedAngle + TwoPi, normalizedAngle < 0); // if angle is negative, add 2*PI
+
+            float angleToGrid = normalizedAngle / TwoPi; // Convert angle to the range [0, 1]
+            float heightToGrid = orbitCoordinate.height / cylinderParameters.height; // Convert height to the range [0, 1]
+
+            // Calculate cell indices in the row and column by multiplying with the grid size and converting to integer.
+            var columnIndex = (uint)math.floor(gridParameters.maxColumnIndex * angleToGrid);
+            var rowIndex = (uint)math.floor(gridParameters.maxRowIndex * heightToGrid);
+
+            return new uint2(columnIndex, rowIndex);
+        }
+
+        #region SurfaceCoordinate related
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float4x4 SurfaceCoordinateToLocalToWorld(SurfaceCoordinate coordinate, in CylinderParameters cylinder)
+        {
+            float x = cylinder.radius * math.sin(coordinate.latitude) * math.cos(coordinate.longitude);
+            float y = cylinder.radius * math.sin(coordinate.latitude) * math.sin(coordinate.longitude);
+            float z = cylinder.radius * math.cos(coordinate.latitude);
+
+            var position = new float3(x, y, z);
+
+            float3 forward = math.normalize(position);
+            float3 up = math.cross(forward, new float3(0, 1, 0));
+            float3 right = math.cross(forward, up);
+
+            var rotation = new float3x3(right, up, forward);
+
+            return new float4x4(rotation, position);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static SurfaceCoordinate LocalToWorldToSurfaceCoordinate(in CylinderParameters cylinder, float3 position)
+        {
+            float longitude = math.atan2(position.x, position.z);
+            float latitude = math.acos(position.y / cylinder.height);
+
+            return new SurfaceCoordinate(latitude, longitude);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static uint2 CalculateCellIndexFromOrbitCoordinate(in GridParameters gridParameters, SurfaceCoordinate coordinate)
+        {
+            coordinate = NormalizeSurfaceCoordinate(coordinate);
+
+            // Calculate cell indices in the row and column by multiplying with the grid size and converting to integer.
+            var columnIndex = (uint)math.floor(gridParameters.maxColumnIndex * (coordinate.longitude + 1f) * 0.5f);
+            var rowIndex = (uint)math.floor(gridParameters.maxRowIndex * (coordinate.latitude + 1f) * 0.5f);
+            return new uint2(columnIndex, rowIndex);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static SurfaceCoordinate NormalizeSurfaceCoordinate(SurfaceCoordinate coordinate)
+        {
+            return new SurfaceCoordinate(math.clamp(coordinate.latitude, NegativeHalfPi, HalfPi),
+                math.clamp(coordinate.longitude, -math.PI, math.PI));
+        }
+
+        /// <summary>
+        /// Adjusts the given surface coordinate by adding an offset.
+        /// </summary>
+        /// <param name="coordinate">The surface coordinate to adjust.</param>
+        /// <param name="offset">The offset to add to the coordinate.</param>
+        /// <returns>The adjusted surface coordinate.</returns>
+        public static SurfaceCoordinate AdjustCoordinate(SurfaceCoordinate coordinate, float2 offset)
+        {
+            // Assuming latitude ranges from -90 to 90 degrees and longitude from -180 to 180 degrees
+            float newLatitude = WrapValue(coordinate.latitude + offset.y, -90f, 90f);
+            float newLongitude = WrapValue(coordinate.longitude + offset.x, -180f, 180f);
+
+            return new SurfaceCoordinate (newLatitude, newLongitude);
+        }
+        
+        // Wraps the value within specified bounds
+        private static float WrapValue(float value, float minValue, float maxValue)
+        {
+            float range = maxValue - minValue;
+            value = Mathf.Repeat(value - minValue, range) + minValue;
+            return value;
+        }
+
+        #endregion SurfaceCoordinate related
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static OrbitCoordinate CalculateOrbitFrom1DIndex(in GridParameters gridParameters, uint2 index2D)
+        {
+            return new OrbitCoordinate
+            {
+                angle = CalculateRadiansAngleOnCylinderAtGridIndex(gridParameters, index2D),
+                height = CalculateHeightOnCylinderAtGridIndex(gridParameters, index2D)
+            };
         }
 
         private static quaternion CalculateCylinderSurfaceNormalAtAngle(in CylinderParameters cylinderParameters, float angle)
@@ -188,21 +339,33 @@ namespace FunctionalLibraries
             };
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float CalculateHeightOnCylinderAtPosition(in CylinderParameters cylinderParameters, float3 position)
         {
-            float height = position.y - cylinderParameters.cylinderOrigin.y;
-            return height;
+            return position.y - cylinderParameters.cylinderOrigin.y;
         }
 
-        private static float CalculateRadiansAngleOnCylinderAtGridIndex(in GridParameters gridParameters, in CylinderParameters cylinderParameters,
-            uint2 cellIndex)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float CalculateRadiansAngleOnCylinderAtGridIndex(in GridParameters gridParameters, uint2 cellIndex)
         {
-            return cellIndex.x * gridParameters.cellSize.x / cylinderParameters.radius;
+            return cellIndex.x * TwoPi / gridParameters.columnNumber;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float CalculateHeightOnCylinderAtGridIndex(in GridParameters gridParameters, uint2 cellIndex)
         {
-            return cellIndex.y * gridParameters.cellSize.y;
+            return (float)cellIndex.y / gridParameters.maxRowIndex * gridParameters.gridSize.y;
+        }
+
+        public static SurfaceCoordinate CalculateSurfaceCoordinateFromIndex(in GridParameters gridParameters, uint2 index2d)
+        {
+            float normalizedRowIndex = (float)index2d.y / gridParameters.maxRowIndex;  // normalize to [0, 1]
+            float normalizedColumnIndex = (float)index2d.x / gridParameters.maxColumnIndex;  // normalize to [0, 1]
+
+            float latitude = (normalizedRowIndex * 2 - 1) * HalfPi;  // scale to [-HalfPi, HalfPi]
+            float longitude = (normalizedColumnIndex * 2 - 1) * math.PI;  // scale to [-Pi, Pi]
+
+            return new SurfaceCoordinate(latitude, longitude);
         }
     }
 }

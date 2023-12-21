@@ -22,12 +22,6 @@ namespace DOTS.Systems.DebugSystems
         public void OnUpdate(ref SystemState state)
         {
             CommandBuilder drawingBuilder = DrawingManager.GetBuilder(true);
-            var gridParametersComponent = SystemAPI.GetSingleton<GridParametersComponent>();
-            ref GridParameters gridParameters = ref gridParametersComponent.gridParameters;
-            JobHandle drawJob = new DebugDrawOccupiedGridCellJob(drawingBuilder, gridParameters).ScheduleParallel(state.Dependency);
-            drawingBuilder.DisposeAfter(drawJob);
-           
-            drawJob.Complete();
             state.CompleteDependency();
         }
 

@@ -5,12 +5,11 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
 
-namespace DOTS.Systems
+namespace DOTS.Systems.InitializationPhase
 {
-    [UpdateInGroup(typeof(InitializationSystemGroup))]
-    [UpdateAfter(typeof(FlowFieldMovementSystem))]
-    [UpdateBefore(typeof(CylinderVelocityConvertingSystem))]
     [DisableAutoCreation]
+    [UpdateInGroup(typeof(InitializationSystemGroup))]
+    [UpdateAfter(typeof(FlowFieldToGridCellRelationSystem))]
     public partial struct RotationSystem : ISystem
     {
         [StructLayout(LayoutKind.Auto)]
@@ -27,8 +26,8 @@ namespace DOTS.Systems
             private void Execute(RefRW<RotationAlongSurfaceComponent> rotationAlongSurfaceComponent,
                 RefRW<FlowFieldVelocityComponent> flowFieldVelocityComponent)
             {
-                rotationAlongSurfaceComponent.ValueRW.angleInDegrees =
-                    (rotationAlongSurfaceComponent.ValueRO.angleInDegrees + 30f * _deltaTime) % 360f;
+                /*rotationAlongSurfaceComponent.ValueRW.angleInDegrees =
+                    (rotationAlongSurfaceComponent.ValueRO.angleInDegrees + 30f * _deltaTime) % 360f;*/
 
                 flowFieldVelocityComponent.ValueRW.flowVelocity +=
                     CylinderCalculations.Calculate2DVelocityFromDirectionAngle(rotationAlongSurfaceComponent.ValueRO.angleInDegrees);
@@ -60,9 +59,10 @@ namespace DOTS.Systems
         public void OnUpdate(ref SystemState state)
         {
             float deltaTime = SystemAPI.Time.DeltaTime;
-            
-            state.Dependency = new FlowVelocityModificationJob().ScheduleParallel(new RotationJob(deltaTime).ScheduleParallel(state.Dependency));
-            state.CompleteDependency();
+
+            // state.Dependency = new FlowVelocityModificationJob().ScheduleParallel(state.Dependency);
+            state.Dependency = new RotationJob(deltaTime).ScheduleParallel(state.Dependency);
+            // state.CompleteDependency();
         }
 
         [BurstCompile]

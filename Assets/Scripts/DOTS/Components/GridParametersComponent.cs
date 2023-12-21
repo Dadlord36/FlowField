@@ -5,7 +5,7 @@ using Unity.Entities;
 namespace DOTS.Components
 {
     [BurstCompile]
-    public struct GridParametersComponent : IComponentData
+    public struct GridParametersComponent : ISharedComponentData
     {
         public GridParameters gridParameters;
     }
